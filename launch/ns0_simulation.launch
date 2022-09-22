@@ -31,12 +31,7 @@
             <remap from="joint_states"     to="joint_states" />
     </node>
 
-    <!-- <node name="rviz" pkg="rviz" type="rviz" args="-d $(find kimm_phri)/rviz/kimm_phri_rviz.rviz -f husky_odom" output="screen"/>       -->          
-    <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="--perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri.perspective " output="screen"/>      
-
-    <!-- <node name="data_plot" pkg="rqt_plot" type="rqt_plot" args="data_plot" />
-    <node name="FT_force_plot" pkg="rqt_plot" type="rqt_plot" args="wrench_measured/force" />
-    <node name="FT_torque_plot" pkg="rqt_plot" type="rqt_plot" args="wrench_measured/torque" /> -->
+    <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="--perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri_panda_husky_notebook.perspective " output="screen"/>      
 
   </group>
 </launch>
