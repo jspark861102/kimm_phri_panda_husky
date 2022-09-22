@@ -1,0 +1,21 @@
+basic_husky_franka_controller:
+    type: kimm_phri/BasicHuskyFrankaController
+    arm_id: panda
+    joint_names:
+        - panda_joint1
+        - panda_joint2
+        - panda_joint3
+        - panda_joint4
+        - panda_joint5
+        - panda_joint6
+        - panda_joint7
+    # Configure the initial defaults for the collision behavior reflexes.
+    collision_config:
+        lower_torque_thresholds_acceleration: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0]  # [Nm]
+        upper_torque_thresholds_acceleration: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0]  # [Nm]
+        lower_torque_thresholds_nominal: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0]  # [Nm]
+        upper_torque_thresholds_nominal: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0]  # [Nm] 
+        lower_force_thresholds_acceleration: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]  # [N, N, N, Nm, Nm, Nm]
+        upper_force_thresholds_acceleration: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]  # [N, N, N, Nm, Nm, Nm]
+        lower_force_thresholds_nominal: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]  # [N, N, N, Nm, Nm, Nm]
+        upper_force_thresholds_nominal: [100.0, 100.0, 100.0, 100.0, 100.0, 100.0]  # [N, N, N, Nm, Nm, Nm]

@@ -1,0 +1,26 @@
+<?xml version="1.0" ?>
+<launch>
+
+  <arg name="robot_ip" default="192.168.10.102" />
+  <arg name="load_gripper" default="true" />
+  
+  <param name="robot_group" type="string" value="ns0"/>
+  <group ns ="ns0">
+  <param name="issimulation" type="bool" value="false"/>
+
+  <include file="$(find franka_control)/launch/franka_control.launch" >
+    <arg name="robot_ip" value="$(arg robot_ip)" />
+    <arg name="load_gripper" value="$(arg load_gripper)" />
+  </include>
+
+  
+    <param name="robot_urdf_path" type="string" value="$(find husky_description)"/>
+    <param name="robot_urdf" type="string" value="/husky_single/husky_panda_hand_free.urdf"/>
+  
+
+  <rosparam command="load" file="$(find kimm_phri)/config/kimm_phri.yaml" />
+  
+  <node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false" output="screen"  args="basic_phri"/>
+  </group>
+  <!-- <node pkg="rviz" type="rviz" output="screen" name="rviz" args="-d $(find kimm_phri)/launch/robot.rviz"/> -->
+</launch>

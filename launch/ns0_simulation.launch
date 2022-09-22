@@ -1,0 +1,42 @@
+<launch>
+  <arg name="pub_mode" default="false"/>
+  <arg name="controller" default="true"/>
+
+  <param name="robot_group" type="string" value="ns0"/>
+  <group ns ="ns0">
+    <param name="issimulation" type="bool" value="true"/>
+    
+    <!-- mujoco -->
+    <node name="mujoco_ros" pkg="mujoco_ros" type="mujoco_ros" required="true" respawn="false" output="screen">
+      <param name="license" type="string" value="$(env HOME)/.mujoco/mjkey.txt" />
+      <param name="pub_mode" value="$(arg pub_mode)"/>
+      <param name="model_file" type="string" value="$(find husky_description)/husky_single/single_husky_panda_phri.xml"/>
+      
+    <!-- controller -->
+    </node>
+      <node name="kimm_phri_simulation" pkg="kimm_phri_panda_husky" args="-keyboard" type="kimm_phri_panda_husky_simulation" output="screen">
+    </node>
+
+    <!-- for pinocchio -->
+    <param name="robot_urdf_path" type="string" value="$(find husky_description)"/>
+    <param name="robot_urdf" type="string" value="/husky_single/husky_panda_hand_free.urdf"/>
+
+
+   <!-- robot publish -->    
+    <param name="robot_description" textfile="$(find husky_description)/husky_single/husky_panda_rviz_ns0.urdf" />
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" respawn="false" output="screen">
+            <param name="use_tf_static"     value="false"/>
+            <param name="publish_frequency" value="100"/>
+            <param name="ignore_timestamp" value="true"/>
+            <remap from="joint_states"     to="joint_states" />
+    </node>
+
+    <!-- <node name="rviz" pkg="rviz" type="rviz" args="-d $(find kimm_phri)/rviz/kimm_phri_rviz.rviz -f husky_odom" output="screen"/>       -->          
+    <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="--perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri.perspective " output="screen"/>      
+
+    <!-- <node name="data_plot" pkg="rqt_plot" type="rqt_plot" args="data_plot" />
+    <node name="FT_force_plot" pkg="rqt_plot" type="rqt_plot" args="wrench_measured/force" />
+    <node name="FT_torque_plot" pkg="rqt_plot" type="rqt_plot" args="wrench_measured/torque" /> -->
+
+  </group>
+</launch>
