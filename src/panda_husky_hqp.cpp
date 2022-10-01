@@ -1027,7 +1027,8 @@ namespace RobotController{
 
     void HuskyFrankaWrapper::g_joint7(VectorXd & g_vec){
         Vector3d g_global;
-        g_global << 0.0, 0.0, -9.81;
+        // g_global << 0.0, 0.0, -9.81;
+        g_global << 0.0, 0.0, 9.81;
         
         SE3 m_wMl;        
         robot_->framePosition(data_, robot_->model().getFrameId("panda_joint7"), m_wMl);

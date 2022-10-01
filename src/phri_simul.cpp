@@ -169,8 +169,8 @@ void vel_accel_pub(){
 void FT_measured_pub() {
     //actually, franka_torque_ is not a measured but command torque, because measurment is not available
     tau_estimated = robot_mass_ * ddq_mujoco + robot_nle_;        
-    tau_ext = franka_torque_ - tau_estimated;        
-    // tau_ext = -franka_torque_ + tau_estimated;        
+    // tau_ext = franka_torque_ - tau_estimated;        
+    tau_ext = -franka_torque_ + tau_estimated;        
     FT_measured = robot_J_.transpose().completeOrthogonalDecomposition().pseudoInverse() * tau_ext;  //robot_J_ is local jacobian      
 
     geometry_msgs::Wrench FT_measured_msg;  

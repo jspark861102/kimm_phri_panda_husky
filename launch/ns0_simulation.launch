@@ -1,6 +1,6 @@
 <launch>
-  <arg name="pub_mode" default="false"/>
-  <arg name="controller" default="true"/>
+  <arg name="pub_mode" default="false"/>  <!-- true: pub all of state with 'sim_status' publisher, false: pub each own publisher -->
+  <arg name="note_book" default="false"/> <!-- true: rqt_gui with notebook size, false: rqt_gui with PC size -->
 
   <param name="robot_group" type="string" value="ns0"/>
   <group ns ="ns0">
@@ -31,7 +31,13 @@
             <remap from="joint_states"     to="joint_states" />
     </node>
 
-    <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="--perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri_panda_husky_notebook.perspective " output="screen"/>      
+   <!-- rqt_gui -->    
+    <group if="$(arg note_book)">
+      <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="--perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri_panda_husky_notebook.perspective " output="screen"/>      
+    </group>
+    <group unless="$(arg note_book)">
+      <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="--perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri_panda_husky.perspective " output="screen"/>      
+    </group>
 
   </group>
 </launch>
