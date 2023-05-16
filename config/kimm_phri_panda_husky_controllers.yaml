@@ -1,5 +1,5 @@
-basic_husky_franka_controller:
-    type: kimm_phri/BasicHuskyFrankaController
+phri_franka_husky_controller:
+    type: kimm_franka_husky_controllers/pHRIFrankaHuskyController
     arm_id: panda
     joint_names:
         - panda_joint1

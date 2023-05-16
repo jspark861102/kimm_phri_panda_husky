@@ -6,10 +6,6 @@ KIMM pHRI application with Padna Robot Arm & Husky Mobile Platform
 ```bash
 git clone https://github.com/jspark861102/kimm_qpoases.git -b melodic
 git clone https://github.com/jspark861102/kimm_hqp_controller_phri.git -b melodic
-git clone https://github.com/jspark861102/weightedhqp.git -b melodic
-git clone https://github.com/jspark861102/kimm_path_planner.git -b melodic
-git clone https://github.com/jspark861102/kimm_joint_planner_ros_interface.git -b melodic
-git clone https://github.com/jspark861102/kimm_se3_planner_ros_interface.git -b melodic
 git clone https://github.com/jspark861102/kimm_trajectory_smoother.git -b melodic
 ```
 
@@ -34,15 +30,12 @@ git clone https://github.com/jspark861102/kimm_phri_panda_husky.git
 ## 2. Run
 ### 2.1 Simulation
 ```bash
-# Simulation with PC Monitor
-roslaunch kimm_phri_panda_husky ns0_simulation.launch
-
-# Simulation with 17inch Notebook
-roslaunch kimm_phri_panda_husky ns0_simulation.launch note_book:=true
+# Simulation 
+roslaunch kimm_phri_panda_husky ns0_phri_simulation.launch
 ```
 
 ### 2.1 Real Robot
 ```bash
-# 1. Ongoing
-roslaunch kimm_phri_panda_husky ns0_real_robot.launch
+# object aware impedance controller for human-robot collaborative transportation
+roslaunch kimm_phri_panda_husky ns0_phri_real.launch
 ```

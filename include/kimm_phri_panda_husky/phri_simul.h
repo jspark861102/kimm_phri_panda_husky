@@ -10,11 +10,11 @@
 #include "std_msgs/String.h"
 #include "std_msgs/Float32MultiArray.h"
 #include "std_msgs/Float32.h"
+#include "std_msgs/Bool.h"
 #include "sensor_msgs/JointState.h"
 #include "geometry_msgs/Transform.h"
 #include "geometry_msgs/Vector3.h"
 #include "geometry_msgs/Wrench.h"
-#include "visualization_msgs/Marker.h"
 #include "kimm_phri_msgs/ObjectParameter.h"
 
 // Tf
@@ -29,20 +29,20 @@ ros::Publisher mujoco_command_pub_;
 ros::Publisher robot_command_pub_;
 ros::Publisher mujoco_run_pub_;
 ros::Publisher joint_states_pub_, wrench_mesured_pub_, object_parameter_pub_, vel_pub_, accel_pub_;
-ros::Publisher ee_state_pub_, base_state_pub_, husky_odom_pub_;
+ros::Publisher ee_state_pub_, base_state_pub_;
 
 mujoco_ros_msgs::JointSet robot_command_msg_;
 geometry_msgs::Transform ee_state_msg_;
 sensor_msgs::JointState base_state_msg_;
 
-double mujoco_time_, time_, dt;
-bool isgrasp_, isstartestimation;
-Eigen::VectorXd franka_qacc_, husky_qacc_, robot_nle_, robot_g_, franka_torque_, robot_g_local_;
-Eigen::MatrixXd robot_mass_, robot_J_, robot_dJ_;
+double mujoco_time_, time_, dt, est_time_;
+bool isgrasp_, ismobile_, issimulation_;
+Eigen::VectorXd franka_qacc_, husky_qacc_, robot_nle_, robot_g_, franka_torque_, Fext_cali_;
+Eigen::MatrixXd robot_mass_, robot_J_local_, robot_dJ_local_, robot_J_world_;
 string group_name;
 std_msgs::String sim_run_msg_;
 
-RobotController::HuskyFrankaWrapper * ctrl_;
+RobotController::FrankaHuskyWrapper * ctrl_;
 Mob mob_;
 State state_;
 tf::TransformBroadcaster* br_;
@@ -63,9 +63,10 @@ void getBaseState();
 EKF * ekf;
 Objdyn objdyn;
 
-double n_param, m_FT;
+bool isstartestimation_, isobjectdynamics_, isFextapplication_, isFextcalibration_;
+double n_param, m_FT, traj_length_in_time_;
 Eigen::MatrixXd A, H, Q, R, P;
-Eigen::VectorXd h, FT_measured, param;
+Eigen::VectorXd h, FT_measured, param, robot_g_local_, FT_object_, param_true_, Fext_global_;
 pinocchio::Motion vel_param, acc_param;
 VectorXd ddq_mujoco, tau_estimated, tau_ext, v_mujoco, a_mujoco, a_mujoco_filtered;
 
@@ -94,10 +95,10 @@ void UpdateMob(){
 
     mob_.torque_d_ = (mob_.gamma_-1.) * mob_.alpha_k_ + mob_.beta_ * (mob_.p_k_ - mob_.gamma_ * mob_.p_k_prev_) + mob_.gamma_ * mob_.torque_d_prev_;
     mob_.mass_inv_ = robot_mass_.inverse();
-    mob_.lambda_inv_ = robot_J_ * mob_.mass_inv_ * robot_J_.transpose();
+    mob_.lambda_inv_ = robot_J_world_ * mob_.mass_inv_ * robot_J_world_.transpose();
     mob_.lambda_ = mob_.lambda_inv_.inverse();
     
-    Eigen::MatrixXd J_trans = robot_J_.transpose();
+    Eigen::MatrixXd J_trans = robot_J_world_.transpose();
     Eigen::MatrixXd J_trans_inv = J_trans.completeOrthogonalDecomposition().pseudoInverse();
 
     mob_.d_force_ = (mob_.mass_inv_ * J_trans *mob_.lambda_).transpose() * mob_.torque_d_;
@@ -107,7 +108,6 @@ void UpdateMob(){
     mob_.p_k_prev_ = mob_.p_k_;
 
 }
-void BaseStatusCallback(sensor_msgs::JointState & msg, const pinocchio::SE3 & H_base);
 void EEStatusCallback(geometry_msgs::Transform& msg, const pinocchio::SE3 & H_ee);
 
 void keyboard_event();

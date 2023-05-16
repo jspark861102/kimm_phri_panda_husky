@@ -1,3 +1,5 @@
+#pragma once
+
 //Pinocchio Header
 #include <pinocchio/fwd.hpp>
 #include <pinocchio/algorithm/joint-configuration.hpp> 
@@ -27,27 +29,21 @@
 #include <kimm_hqp_controller/trajectory/trajectory_euclidian.hpp>
 #include <kimm_hqp_controller/trajectory/trajectory_se3.hpp>
 #include <kimm_hqp_controller/solver/solver_HQP_factory.hxx>
-#include <kimm_hqp_controller/solver/util.hpp>
+// #include <kimm_hqp_controller/solver/util.hpp> //multiple definition problem
 #include <kimm_hqp_controller/math/util.hpp>
-
-// service 
-#include "kimm_joint_planner_ros_interface/action_joint_path.h"
-#include "kimm_se3_planner_ros_interface/action_se3_path.h"
-#include "kimm_path_planner_ros_interface/action_mobile_path.h"
-#include "kimm_joint_planner_ros_interface/JointAction.h"
-#include "kimm_se3_planner_ros_interface/SE3Action.h"
-#include "kimm_path_planner_ros_interface/MobileTrajectory.h"
 
 using namespace std;
 using namespace Eigen;
 
 typedef Eigen::Matrix<double, 7, 1> Vector7d;
+typedef Eigen::Matrix<double, 6, 1> Vector6d;
 
 typedef struct State {   
     VectorXd q_;
     VectorXd v_;
     VectorXd dv_;
     VectorXd torque_;
+    VectorXd tau_; //use to calculate ddq
 } state;   
 typedef struct Mob{
     MatrixXd lambda_inv_;
@@ -67,10 +63,6 @@ typedef struct Joint_Action{
     bool is_succeed_{true};
 
 } jointaction;
-typedef struct Mobile_Action{
-    std::vector<geometry_msgs::Pose2D> path_;
-    bool is_succeed_{true};
-} mobileaction;
 typedef struct SE3_Action{
     VectorXd kp_, kd_;
     pinocchio::SE3 se3_target_;
@@ -82,44 +74,50 @@ typedef struct SE3_Action{
 } se3action;
 
 namespace RobotController{
-    class HuskyFrankaWrapper{
+    class FrankaHuskyWrapper{
         public: 
-            HuskyFrankaWrapper(const std::string & robot_node, const bool & issimulation, ros::NodeHandle & node);
-            ~HuskyFrankaWrapper(){};
+            FrankaHuskyWrapper(const std::string & robot_node, const bool & issimulation, const bool & ismobile, ros::NodeHandle & node);
+            ~FrankaHuskyWrapper(){};
 
             void initialize();
             void ctrl_update(const int& ); // msg for chaning controller
-            void franka_update(const sensor_msgs::JointState&); // franka state update
-            void franka_update(const Vector7d&, const Vector7d&); // franka state update
-
+            void franka_update(const sensor_msgs::JointState&); // franka state update //for simulation
+            void franka_update(const Vector7d&, const Vector7d&); // franka state update //for experiment            
+            void franka_update(const Vector7d& q, const Vector7d& qdot, const Vector7d& tau); // franka state update //for experiment
             void husky_update(const sensor_msgs::JointState&); // husky state update
             void husky_update(const Vector3d&, const Vector3d&, const Vector2d&, const Vector2d&); // husky state update
+            void Fext_update(const Vector6d& Fext); //for simulation & experiment
 
             void compute(const double &); // computation by hqp controller
             void franka_output(VectorXd & qacc); // joint torque of franka 
             void husky_output(VectorXd & qvel); // joint velocity of husky
 
             void position(pinocchio::SE3 & oMi);
+            void position_offset(pinocchio::SE3 & oMi);
             void com(Eigen::Vector3d& com);
             void velocity(pinocchio::Motion& vel);
-            void velocity_origin(pinocchio::Motion& vel);
-            void velocity_global(pinocchio::Motion& vel);
+            void velocity_origin(pinocchio::Motion& vel);            
             void acceleration(pinocchio::Motion& accel);
             void acceleration_origin(pinocchio::Motion & accel);
-            void acceleration_global(pinocchio::Motion & accel);
+            void acceleration_origin2(pinocchio::Motion & accel);
             void force(pinocchio::Force & force);
             void force_origin(pinocchio::Force & force);
-            void force_global(pinocchio::Force & force);
+            void force_origin2(pinocchio::Force & force);
             void tau(VectorXd & tau_vec);
             void ddq(VectorXd & ddq_vec);
 
             void mass(MatrixXd & mass_mat);
             void nle(VectorXd & nle_vec);
             void JWorld(MatrixXd & J);
+            void JLocal(MatrixXd & Jo);
             void JLocal_offset(MatrixXd & Jo);
+            void dJLocal(MatrixXd & dJo);
             void dJLocal_offset(MatrixXd & dJo);
             void g(VectorXd & g_vec);
             void g_joint7(VectorXd & g_vec);
+            void g_local_offset(VectorXd & g_vec);
+            void Fh_gain_matrix(MatrixXd & Fh);
+            void MxLocal_offset(MatrixXd & Mx);
 
             void ee_state(Vector3d & pos, Eigen::Quaterniond & quat);
             void base_state(Vector3d & base);
@@ -128,80 +126,44 @@ namespace RobotController{
             void roty(double & a, Eigen::Matrix3d & rot);
             void rotz(double & a, Eigen::Matrix3d & rot);
 
+            MatrixXd skew_matrix(const VectorXd& vec);
+            pinocchio::SE3 vel_to_SE3(VectorXd vel, double dt); 
+            void get_dt(double dt);
+            double trajectory_length_in_time();
+            double noise_elimination(double x, double limit);
+
             int ctrltype(){
                 return ctrl_mode_;
             }
+            
             void state(State & state_robot){
                 state_robot = state_;
             }
-            bool reset_control_;
-
-            void jointActionCallback(const kimm_joint_planner_ros_interface::JointActionConstPtr &msg){
-                ROS_WARN("jointActionRecieved");
-                joint_action_.kp_.setZero(7);
-                joint_action_.kd_.setZero(7);
-                joint_action_.q_target_.setZero(7);
-                joint_action_.duration_ = msg->duration;
-
-                for (int i=0; i<na_-2; i++){
-                        joint_action_.kp_(i) = msg->kp[i];
-                        joint_action_.kd_(i) = msg->kv[i];
-                        joint_action_.q_target_(i) = msg->target_joint[0].position[i];
-                }
-                
-                joint_action_.type_ = msg->traj_type;
-                joint_action_.is_succeed_ = false;
-            };
-            void se3ActionCallback(const kimm_se3_planner_ros_interface::SE3ActionConstPtr &msg){
-                ROS_WARN("SE3ActionRecieved");
-                se3_action_.kp_.setZero(6);
-                se3_action_.kd_.setZero(6);
-                
-                se3_action_.se3_target_.translation()(0) = msg->target_se3[0].translation.x;
-                se3_action_.se3_target_.translation()(1) = msg->target_se3[0].translation.y;
-                se3_action_.se3_target_.translation()(2) = msg->target_se3[0].translation.z;
-                Eigen::Quaterniond quat;
-                quat.x() = msg->target_se3[0].rotation.x;
-                quat.y() = msg->target_se3[0].rotation.y;
-                quat.z() = msg->target_se3[0].rotation.z;
-                quat.w() = msg->target_se3[0].rotation.w;
-                quat.normalize();
-                se3_action_.se3_target_.rotation() = quat.toRotationMatrix();
-                se3_action_.duration_ = msg->duration;
-
-                for (int i=0; i<6; i++){
-                    se3_action_.kp_(i) = msg->kp[i];
-                    se3_action_.kd_(i) = msg->kv[i];
-                }
-                
-                se3_action_.type_ = msg->traj_type;
-                se3_action_.is_wholebody_ = msg->iswholebody.data;
-                se3_action_.is_succeed_ = false;
-            };
-            void mobileActionCallback(const kimm_path_planner_ros_interface::MobileTrajectoryConstPtr &msg){
-                ROS_WARN("MobileActionRecieved");
-                ROS_WARN("%ld", msg->points.size());
-                mobile_action_.path_ = msg->points;
-                mobile_action_.is_succeed_ = false;
-            };
+            bool reset_control_;  
 
         private:
-            bool issimulation_, mode_change_, update_weight_, planner_res_;
+            bool issimulation_, mode_change_, update_weight_, trjectory_end_;
             double stime_, time_, node_index_, node_num_, prev_node_;
             std::string robot_node_;
             State state_;
             Joint_Action joint_action_;
-            SE3_Action se3_action_;
-            Mobile_Action mobile_action_;
+            SE3_Action se3_action_;                  
 
             ros::Subscriber joint_action_subs_, se3_action_subs_, mobile_action_subs_;
         
             int ctrl_mode_;
             Eigen::VectorXd q_ref_;
-            pinocchio::SE3 H_ee_ref_, H_mobile_ref_;
-            Vector3d ee_offset_;
-            MatrixXd Adj_mat;
-            double est_time;
+            pinocchio::SE3 H_ee_ref_, H_mobile_ref_, T_offset_, T_vel_;
+            Vector3d ee_offset_, obj_length_global_, obj_length_local_;
+            MatrixXd Adj_mat_, hGr_local_, hGr_local_Null_, hGr_local_pinv_, R_joint7_atHome_;
+            double est_time_, dt_;
+            double joint7_to_finger_;
+            Vector6d Fext_, Fext_calibration_, Dinv_gain_;
+            bool initial_calibration_update_, getcalibration_;     
+            MatrixXd Me_inv_, P_global_, P_local_, Fh_;       
+            ofstream fout_;  
+            double traj_length_in_time_;   
+            bool ismobile_;           
 
             //hqp
             std::shared_ptr<kimmhqp::robot::RobotWrapper> robot_;
@@ -212,7 +174,7 @@ namespace RobotController{
             
             std::shared_ptr<kimmhqp::tasks::TaskJointPosture> postureTask_;
             std::shared_ptr<kimmhqp::tasks::TaskSE3Equality> eeTask_;
-            std::shared_ptr<kimmhqp::tasks::TaskJointBounds> torqueBoundsTask_;
+            std::shared_ptr<kimmhqp::tasks::TaskJointBounds> torqueBoundsTask_;            
             std::shared_ptr<kimmhqp::tasks::TaskMobileEquality> mobileTask_, mobileTask2_;
 
             std::shared_ptr<kimmhqp::trajectory::TrajectoryEuclidianCubic> trajPosture_Cubic_;
@@ -233,7 +195,7 @@ namespace RobotController{
             //kimm_path_planner_ros_interface::action_mobile_path action_mobile_srv_; 
             // kimm_joint_planner_ros_interface::action_joint_path action_joint_srv_; 
             // kimm_se3_planner_ros_interface::action_se3_path action_se3_srv_; 
-            ros::ServiceClient joint_action_client_, se3_action_client_, mobile_action_client_;
+            ros::ServiceClient joint_action_client_, se3_action_client_;
 
             //ros
             ros::NodeHandle n_node_;

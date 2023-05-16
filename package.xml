@@ -26,15 +26,12 @@
   <exec_depend>message_runtime</exec_depend>
   <exec_depend>panda_moveit_config</exec_depend>
   <exec_depend>rospy</exec_depend>
-  <depend>kimm_joint_planner_ros_interface</depend>
-  <depend>kimm_se3_planner_ros_interface</depend>
-  <depend>kimm_path_planner_ros_interface</depend>
-  <!-- <depend>kimm_object_estimation</depend> -->
+  <depend>kimm_object_estimation</depend>
   <depend>tf</depend>
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>
-    <controller_interface plugin="${prefix}/kimm_phri_plugin.xml"/>
+    <controller_interface plugin="${prefix}/kimm_phri_panda_plugin.xml"/>
     <!-- Other tools can request additional information be placed here -->
 
   </export>

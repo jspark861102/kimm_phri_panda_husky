@@ -14,20 +14,20 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   hardware_interface
   pluginlib
-  realtime_tools
-  roscpp
+  realtime_tools  
   rospy
   roslib
   tf
 )
 
 find_package(Eigen3 REQUIRED)
-find_package(Franka 0.5.0 REQUIRED)
+find_package(Franka 0.7.0 REQUIRED)
 find_package(kimm_hqp_controller REQUIRED)
-find_package(kimm_joint_planner_ros_interface REQUIRED)
-find_package(kimm_se3_planner_ros_interface REQUIRED)
-find_package(kimm_path_planner_ros_interface REQUIRED)
 find_package(kimm_object_estimation REQUIRED)
+
+generate_dynamic_reconfigure_options(
+  cfg/ekf_param.cfg  
+)
 
 catkin_package(
   LIBRARIES ${PROJECT_NAME}
@@ -38,8 +38,7 @@ catkin_package(
     geometry_msgs
     hardware_interface
     pluginlib
-    realtime_tools
-    tf
+    realtime_tools    
     roscpp
   DEPENDS Franka
 )
@@ -58,7 +57,7 @@ SET(${LIBRARY_NAME}_SOURCES
 ADD_HEADER_GROUP(${LIBRARY_NAME}_HEADERS)
 ADD_SOURCE_GROUP(${LIBRARY_NAME}_SOURCES)
 ADD_LIBRARY(${LIBRARY_NAME} SHARED ${${LIBRARY_NAME}_SOURCES} ${${LIBRARY_NAME}_HEADERS})
-TARGET_INCLUDE_DIRECTORIES(${LIBRARY_NAME} PUBLIC $<INSTALL_INTERFACE:include> ${kimm_hqp_controller_INCLUDE_DIRS} ${kimm_joint_planner_ros_interface_INCLUDE_DIRS} ${kimm_se3_planner_ros_interface_INCLUDE_DIRS} ${kimm_path_planner_ros_interface_INCLUDE_DIRS} ${kimm_object_estimation_INCLUDE_DIRS}) 
+TARGET_INCLUDE_DIRECTORIES(${LIBRARY_NAME} PUBLIC $<INSTALL_INTERFACE:include> ${kimm_hqp_controller_INCLUDE_DIRS} ${kimm_object_estimation_INCLUDE_DIRS}) 
 TARGET_LINK_LIBRARIES(${LIBRARY_NAME} PUBLIC ${kimm_hqp_controller_LIBRARIES} ${kimm_object_estimation_LIBRARIES})
 
 ## Franka Controller for Real Robot
@@ -94,7 +93,8 @@ target_link_libraries(${PROJECT_NAME}_simulation
   ${LIBRARY_NAME}
   -lpthread
 )
-add_dependencies(${PROJECT_NAME}_simulation ${PROJECT_NAME}_gencpp)
+add_dependencies(${PROJECT_NAME}_simulation ${PROJECT_NAME}_gencpp ${PROJECT_NAME}_gencfg
+)
 
 
 #############
@@ -114,10 +114,6 @@ install(DIRECTORY config
 )
 install(FILES ${PROJECT_NAME}_plugin.xml
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-)
-catkin_install_python(
-  PROGRAMS scripts/interactive_marker.py scripts/move_to_start.py
-  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
 #############
