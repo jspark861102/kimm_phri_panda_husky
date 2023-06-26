@@ -13,6 +13,7 @@ git clone https://github.com/jspark861102/kimm_trajectory_smoother.git -b melodi
 ```bash
 git clone https://github.com/jspark861102/franka_ros.git #my used version (0.8.1)
 git clone https://github.com/jspark861102/husky.git -b melodic-devel #my used version (0.4.10)
+git clone https://github.com/jspark861102/robotiq_2finger_grippers.git
 git clone https://github.com/jspark861102/kimm_robots_description.git -b melodic
 git clone https://github.com/jspark861102/kimm_mujoco_ros.git -b melodic
 ```
@@ -26,6 +27,7 @@ git clone https://github.com/jspark861102/kimm_phri_msgs.git
 ### 1.4 pHRI task
 ```bash
 git clone https://github.com/jspark861102/kimm_phri_panda_husky.git
+git clone https://github.com/jspark861102/kimm_phri_viz.git
 ```
 
 ## 2. Run
