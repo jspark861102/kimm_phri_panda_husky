@@ -4,12 +4,12 @@
     "mainwindow": {
       "keys": {
         "geometry": {
-          "repr(QByteArray.hex)": "QtCore.QByteArray(b'01d9d0cb00030000000007460000002a00000ef20000041d000007460000004f00000ef20000041d00000000000000000f00000007460000004f00000ef20000041d')",
+          "repr(QByteArray.hex)": "QtCore.QByteArray(b'01d9d0cb00030000000005ed0000001b00000ef60000040e000005ed0000004000000ef60000040e00000000000000000f00000005ed0000004000000ef60000040e')",
           "type": "repr(QByteArray.hex)",
-          "pretty-print": "     F *     F O          F O    "
+          "pretty-print": "               @            @    "
         },
         "state": {
-          "repr(QByteArray.hex)": "QtCore.QByteArray(b'000000ff00000000fd0000000100000003000007ad000003a3fc0100000004fc00000000000001cc0000013f00fffffffc0200000002fb00000042007200710074005f0070006c006f0074005f005f0050006c006f0074005f005f0031005f005f00440061007400610050006c006f00740057006900640067006500740100000016000001d20000008a00fffffffb00000042007200710074005f0070006c006f0074005f005f0050006c006f0074005f005f0032005f005f00440061007400610050006c006f007400570069006400670065007401000001ee000001cb0000008a00fffffffc000001d2000001bd0000013f00fffffffc0200000002fb00000042007200710074005f0070006c006f0074005f005f0050006c006f0074005f005f0033005f005f00440061007400610050006c006f00740057006900640067006500740100000016000001d20000008a00fffffffb00000042007200710074005f0070006c006f0074005f005f0050006c006f0074005f005f0034005f005f00440061007400610050006c006f007400570069006400670065007401000001ee000001cb0000008a00fffffffb0000006c007200710074005f007200650063006f006e006600690067007500720065005f005f0050006100720061006d005f005f0031005f005f005f0070006c007500670069006e0063006f006e007400610069006e00650072005f0074006f0070005f0077006900640067006500740100000000000003d90000000000000000fb00000026007200710074005f007200760069007a005f005f005200560069007a005f005f0031005f005f010000039500000418000003bc00ffffff000007ad0000000000000004000000040000000800000008fc00000001000000030000000100000036004d0069006e0069006d0069007a006500640044006f0063006b00570069006400670065007400730054006f006f006c0062006100720000000000ffffffff0000000000000000')",
+          "repr(QByteArray.hex)": "QtCore.QByteArray(b'000000ff00000000fd00000001000000030000090a000003a3fc0100000004fc000000000000018f0000013f00fffffffc0200000002fb00000042007200710074005f0070006c006f0074005f005f0050006c006f0074005f005f0031005f005f00440061007400610050006c006f00740057006900640067006500740100000016000001d20000008a00fffffffb00000042007200710074005f0070006c006f0074005f005f0050006c006f0074005f005f0032005f005f00440061007400610050006c006f007400570069006400670065007401000001ee000001cb0000008a00fffffffc00000195000001910000013f00fffffffc0200000002fb00000042007200710074005f0070006c006f0074005f005f0050006c006f0074005f005f0033005f005f00440061007400610050006c006f00740057006900640067006500740100000016000001d20000008a00fffffffb00000042007200710074005f0070006c006f0074005f005f0050006c006f0074005f005f0034005f005f00440061007400610050006c006f007400570069006400670065007401000001ee000001cb0000008a00fffffffb0000006c007200710074005f007200650063006f006e006600690067007500720065005f005f0050006100720061006d005f005f0031005f005f005f0070006c007500670069006e0063006f006e007400610069006e00650072005f0074006f0070005f007700690064006700650074010000032c000001c00000010900fffffffb00000026007200710074005f007200760069007a005f005f005200560069007a005f005f0031005f005f01000004f200000418000003bc00ffffff0000090a0000000000000004000000040000000800000008fc00000001000000030000000100000036004d0069006e0069006d0069007a006500640044006f0063006b00570069006400670065007400730054006f006f006c0062006100720000000000ffffffff0000000000000000')",
           "type": "repr(QByteArray.hex)",
           "pretty-print": "                     ?                                                                                                          Brqt_plot__Plot__3__DataPlotWidget          Brqt_plot__Plot__4__DataPlotWidget          lrqt_reconfigure__Param__1___plugincontainer_top_widget          &rqt_rviz__RViz__1__                            6MinimizedDockWidgetsToolbar        "
         }
@@ -29,7 +29,7 @@
     "pluginmanager": {
       "keys": {
         "running-plugins": {
-          "repr": "{'rqt_plot/Plot': [1, 2, 3, 4], 'rqt_rviz/RViz': [1]}",
+          "repr": "{'rqt_plot/Plot': [1, 2, 3, 4], 'rqt_reconfigure/Param': [1], 'rqt_rviz/RViz': [1]}",
           "type": "repr"
         }
       },
@@ -65,11 +65,11 @@
                   "type": "repr"
                 },
                 "topics": {
-                  "repr": "'/ns1/object_parameter/mass'",
+                  "repr": "'/ns1/real_robot/object_parameter/mass'",
                   "type": "repr"
                 },
                 "x_limits": {
-                  "repr": "[172.41173934936523, 182.41173934936523]",
+                  "repr": "[15.116768598556519, 25.11676859855652]",
                   "type": "repr"
                 },
                 "y_limits": {
@@ -112,11 +112,11 @@
                   "type": "repr"
                 },
                 "topics": {
-                  "repr": "['/ns1/object_parameter/com[0]', '/ns1/object_parameter/com[1]', '/ns1/object_parameter/com[2]']",
+                  "repr": "['/ns1/real_robot/object_parameter/com[0]', '/ns1/real_robot/object_parameter/com[1]', '/ns1/real_robot/object_parameter/com[2]']",
                   "type": "repr"
                 },
                 "x_limits": {
-                  "repr": "[175.41431665420532, 185.41431665420532]",
+                  "repr": "[14.005316972732544, 24.005316972732544]",
                   "type": "repr"
                 },
                 "y_limits": {
@@ -159,15 +159,15 @@
                   "type": "repr"
                 },
                 "topics": {
-                  "repr": "['/ns1/wrench_measured/force/x', '/ns1/wrench_measured/force/y', '/ns1/wrench_measured/force/z']",
+                  "repr": "['/ns1/real_robot/Fext_local_forObjectEstimation/force/x', '/ns1/real_robot/Fext_local_forObjectEstimation/force/y', '/ns1/real_robot/Fext_local_forObjectEstimation/force/z']",
                   "type": "repr"
                 },
                 "x_limits": {
-                  "repr": "[173.31364631652832, 183.31364631652832]",
+                  "repr": "[12.30445289611816, 22.304452896118164]",
                   "type": "repr"
                 },
                 "y_limits": {
-                  "repr": "[-50.0, 50.0]",
+                  "repr": "[-48.910191725529785, 51.089808274470215]",
                   "type": "repr"
                 }
               },
@@ -206,11 +206,11 @@
                   "type": "repr"
                 },
                 "topics": {
-                  "repr": "['/ns1/wrench_measured/torque/x', '/ns1/wrench_measured/torque/y', '/ns1/wrench_measured/torque/z']",
+                  "repr": "['/ns1/real_robot/Fext_local_forObjectEstimation/torque/x', '/ns1/real_robot/Fext_local_forObjectEstimation/torque/y', '/ns1/real_robot/Fext_local_forObjectEstimation/torque/z']",
                   "type": "repr"
                 },
                 "x_limits": {
-                  "repr": "[174.16409850120544, 184.16409850120544]",
+                  "repr": "[13.006872653961182, 23.00687265396118]",
                   "type": "repr"
                 },
                 "y_limits": {
@@ -225,6 +225,23 @@
         "plugin__rqt_reconfigure__Param__1": {
           "keys": {},
           "groups": {
+            "dock_widget___plugincontainer_top_widget": {
+              "keys": {
+                "dock_widget_title": {
+                  "repr": "'Dynamic Reconfigure'",
+                  "type": "repr"
+                },
+                "dockable": {
+                  "repr": "True",
+                  "type": "repr"
+                },
+                "parent": {
+                  "repr": "None",
+                  "type": "repr"
+                }
+              },
+              "groups": {}
+            },
             "plugin": {
               "keys": {
                 "_splitter": {
@@ -233,11 +250,11 @@
                   "pretty-print": "       , d     "
                 },
                 "expanded_nodes": {
-                  "repr": "None",
+                  "repr": "[]",
                   "type": "repr"
                 },
                 "selected_nodes": {
-                  "repr": "None",
+                  "repr": "['/ekf_param_node']",
                   "type": "repr"
                 },
                 "splitter": {
@@ -260,7 +277,7 @@
             "dock_widget__": {
               "keys": {
                 "dock_widget_title": {
-                  "repr": "'kimm_phri_panda_husky_sim_49inch_rviz.rviz[*] - RViz'",
+                  "repr": "'kimm_phri_panda_husky_real_49inch_rviz.rviz[*] - RViz'",
                   "type": "repr"
                 },
                 "dockable": {
@@ -281,7 +298,7 @@
                   "type": "repr"
                 },
                 "rviz_config_file": {
-                  "repr": "'/home/kimm/kimm_catkin_phri_panda_husky/src/kimm_phri_panda_husky/rviz/kimm_phri_panda_husky_sim_49inch_rviz.rviz'",
+                  "repr": "'/home/kimm/kimm_catkin_phri_panda_husky/src/kimm_phri_panda_husky/rviz/kimm_phri_panda_husky_real_49inch_rviz.rviz'",
                   "type": "repr"
                 }
               },

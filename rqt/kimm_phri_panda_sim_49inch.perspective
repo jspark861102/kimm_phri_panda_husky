@@ -65,7 +65,7 @@
                   "type": "repr"
                 },
                 "topics": {
-                  "repr": "'/ns0/object_parameter/mass'",
+                  "repr": "'/ns1/object_parameter/mass'",
                   "type": "repr"
                 },
                 "x_limits": {
@@ -112,7 +112,7 @@
                   "type": "repr"
                 },
                 "topics": {
-                  "repr": "['/ns0/object_parameter/com[0]', '/ns0/object_parameter/com[1]', '/ns0/object_parameter/com[2]']",
+                  "repr": "['/ns1/object_parameter/com[0]', '/ns1/object_parameter/com[1]', '/ns1/object_parameter/com[2]']",
                   "type": "repr"
                 },
                 "x_limits": {
@@ -159,7 +159,7 @@
                   "type": "repr"
                 },
                 "topics": {
-                  "repr": "['/ns0/wrench_measured/force/x', '/ns0/wrench_measured/force/y', '/ns0/wrench_measured/force/z']",
+                  "repr": "['/ns1/wrench_measured/force/x', '/ns1/wrench_measured/force/y', '/ns1/wrench_measured/force/z']",
                   "type": "repr"
                 },
                 "x_limits": {
@@ -206,7 +206,7 @@
                   "type": "repr"
                 },
                 "topics": {
-                  "repr": "['/ns0/wrench_measured/torque/x', '/ns0/wrench_measured/torque/y', '/ns0/wrench_measured/torque/z']",
+                  "repr": "['/ns1/wrench_measured/torque/x', '/ns1/wrench_measured/torque/y', '/ns1/wrench_measured/torque/z']",
                   "type": "repr"
                 },
                 "x_limits": {

@@ -2,12 +2,16 @@
 <launch>  
   <arg name="robot_ip" default="192.168.10.52" />
   <arg name="load_gripper" default="true" />    
-  <arg name="mobile" default="true"/> 
+  <arg name="mobile" default="false"/> 
+  <arg name="calibration" default="false"/> 
   <arg name="note_book" default="false"/> <!-- true: rqt_gui with notebook size, false: rqt_gui with PC size -->
 
-  <param name="robot_group" type="string" value="ns0"/>  
+  <param name="robot_group" type="string" value="ns1"/>  
+  <param name="load_gripper" type="bool" value="$(arg load_gripper)"/>
+  <param name="robotiq_gripper" type="bool" value="false"/>
   <param name="mobile" type="bool" value="$(arg mobile)"/>
-  <param name="issimulation" type="bool" value="true"/>
+  <param name="issimulation" type="bool" value="false"/>
+  <param name="iscalibration" type="bool" value="$(arg calibration)"/>
 
   <!-- franka_bringup -->
   <include file="$(find franka_control)/launch/franka_control.launch" >
@@ -15,19 +19,40 @@
     <arg name="load_gripper" value="$(arg load_gripper)" />
   </include> 
 
-  <group ns ="ns0">
-    <group if="$(arg mobile)">
+  <group ns ="ns1">
+    <group if="$(arg mobile)">      
       <!-- for pinocchio -->
       <param name="robot_urdf_path" type="string" value="$(find husky_description)"/>
       <param name="robot_urdf" type="string" value="/husky_single/husky_panda_hand_free.urdf"/>
+
+      <!-- for joint name for gui -->
+      <param name="gui_urdf_path" type="string" value="$(find husky_description)"/>
+      <param name="gui_urdf_name" type="string" value="/husky_single/husky_panda_rviz_ns1.urdf"/>
+
+      <!-- for tf -->
+      <param name="robot_description" textfile="$(find husky_description)/husky_single/husky_panda_rviz_ns1.urdf"/>
+      <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" respawn="true">        
+        <remap from="joint_states" to="real_robot/joint_states" />
+      </node>          
       
       <!-- rqt -->
       <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="--perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri_panda_husky_real_30inch.perspective" output="screen"/>      
     </group>
+
     <group unless="$(arg mobile)">
       <!-- for pinocchio -->
       <param name="robot_urdf_path" type="string" value="$(find franka_panda_description)"/>
       <param name="robot_urdf" type="string" value="/franka_single/panda_arm_hand_l.urdf"/>                        
+
+      <!-- for joint name for gui -->
+      <param name="gui_urdf_path" type="string" value="$(find franka_panda_description)"/>
+      <param name="gui_urdf_name" type="string" value="/franka_single/panda_arm_hand_l_rviz.urdf"/>
+
+      <!-- for tf -->
+      <param name="robot_description" textfile="$(find franka_panda_description)/franka_single/panda_arm_hand_l_rviz.urdf"/>
+      <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" respawn="true">        
+        <remap from="joint_states" to="real_robot/joint_states" />
+      </node>          
       
       <!-- rqt -->
       <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="--perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri_panda_real_30inch.perspective" output="screen"/>

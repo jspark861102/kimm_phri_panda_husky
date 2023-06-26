@@ -12,8 +12,8 @@ using namespace kimmhqp::robot;
 using namespace kimmhqp::contacts;
 
 namespace RobotController{
-    FrankaHuskyWrapper::FrankaHuskyWrapper(const std::string & robot_node, const bool & issimulation, const bool & ismobile, ros::NodeHandle & node)
-    : robot_node_(robot_node), issimulation_(issimulation), ismobile_(ismobile), n_node_(node)
+    FrankaHuskyWrapper::FrankaHuskyWrapper(const std::string & robot_node, const bool & issimulation, const bool & ismobile, const bool & isrobotiq, const bool & iscalibration, ros::NodeHandle & node)
+    : robot_node_(robot_node), issimulation_(issimulation), ismobile_(ismobile), isrobotiq_(isrobotiq), getcalibration_(iscalibration), n_node_(node)
     {
         time_ = 0.;        
         node_index_ = 0;
@@ -23,10 +23,7 @@ namespace RobotController{
         ctrl_mode_ = 0;                
     }
 
-    void FrankaHuskyWrapper::initialize(){
-        // Calibration Data
-        getcalibration_ = false;
-
+    void FrankaHuskyWrapper::initialize(){        
         // Robot for pinocchio
         string model_path, urdf_name;
         n_node_.getParam("/" + robot_node_ +"/robot_urdf_path", model_path);
@@ -64,84 +61,47 @@ namespace RobotController{
         else           posture_gain.resize(na_);
         
         if (!issimulation_) //for real
-        	// posture_gain << 200., 200., 200., 200., 200., 200., 200.;
-            // posture_gain << 250., 150., 250., 100., 100., 100., 100.;
-            // posture_gain << 100., 100., 100., 100., 100., 100., 100.;            
+        	// posture_gain << 200., 200., 200., 200., 200., 200., 200.;            
             posture_gain << 100., 100., 100., 200., 200., 200., 200.;
-        else // for simulation
-        	// posture_gain << 4000., 4000., 4000., 4000., 4000., 4000., 4000.;
+        else // for simulation        	
             posture_gain << 40000., 40000., 40000., 40000., 40000., 40000., 40000.;
 
         postureTask_->Kp(posture_gain);
         postureTask_->Kd(2.0*postureTask_->Kp().cwiseSqrt());
         
         //////////////////// EE offset ////////////////////////////////////////        
-        Matrix3d Rx, Rz;
-        double anglex = -180.0*M_PI/180.0;
-        double anglez =   45.0*M_PI/180.0;
-        rotx(anglex, Rx);
-        rotz(anglez, Rz);   
-        R_joint7_atHome_ = Rz * Rx;
-
         //When offset is applied, the control characteristics seems to be changed (gain tuning is needed)
-        //This offset is applied to both reference (in this code) and feedback (in task_se3_equality.cpp)
-        joint7_to_finger_ = 0.2054; //0.2054 (z-axis) = 0.107(distance from joint7 to hand) + 0.0584(hand length) + 0.04(finger length)         
-        
-        // ee_offset_ << 0.0, 0.0, 0.0; //offset is applied w.r.t. joint7 LOCAL coordinate    
-        ee_offset_ = R_joint7_atHome_ * Vector3d(0.0, 0.0, -joint7_to_finger_); //global to local
-        // ee_offset_ = R_joint7_atHome_ * Vector3d(0.0, 0.4, -joint7_to_finger_); //global to local
+        //This offset is applied to both reference (in this code) and feedback (in task_se3_equality.cpp)        
+        if (isrobotiq_) joint7_to_finger_ = 0.247; //0.247 (z-axis) = 0.222(distance from link7 to left_inner_finger) + 0.025(finger center length)         
+        else            joint7_to_finger_ = 0.2054; //0.2054 (z-axis) = 0.107(distance from link7 to EE) + 0.0584(hand length) + 0.04(finger length)          
 
-        T_offset_.setIdentity();
-        T_offset_.translation(ee_offset_);                
-
-        Adj_mat_.resize(6,6);
-        Adj_mat_.setIdentity();
-        Adj_mat_.topRightCorner(3,3) = -1 * skew_matrix(ee_offset_); //due to "A cross B = -B cross A"
+        this->R_joint7();   //make rotation matrix of joint7 from global to local  
+        this->eeoffset_update(R_joint7_atHome_); //pair with home position    
 
         //////////////////// human grasp position (object length) //////////////////////////////////////// 
         //define object length 
-        obj_length_global_ = Vector3d(0.0, -0.4, 0.0); // 0.4 length in global y axis                                
-        obj_length_local_  = R_joint7_atHome_ * obj_length_global_; // global to local
+        obj_length_global_ = Vector3d(0.0, -1.5, 0.0); // 1.5 length in global y axis                                
+        obj_length_local_  = R_joint7_atHome_ * obj_length_global_; // global to local                
 
-        //define hGr matrix in local coordinate
-        hGr_local_.resize(3,6);
-        hGr_local_.topLeftCorner(3,3).setIdentity();         
-        hGr_local_.topRightCorner(3,3) = -1 * skew_matrix(obj_length_local_);
+        this->EstimationMotion();
         
-        hGr_local_pinv_.resize(6,3);
-        hGr_local_pinv_ = hGr_local_.completeOrthogonalDecomposition().pseudoInverse();
-
-        hGr_local_Null_.resize(6,6);
-        hGr_local_Null_ = MatrixXd::Identity(6,6) - hGr_local_pinv_* hGr_local_;
-
-        //define P matrix
-        P_global_.resize(6,6);
-        P_global_.setIdentity();
-        P_global_.bottomLeftCorner(3,3) = -1*skew_matrix(obj_length_global_);        
-
-        P_local_.resize(6,6);
-        P_local_.setIdentity();
-        P_local_.bottomLeftCorner(3,3) = -1*skew_matrix(obj_length_local_);
+        //trajectory length in time for object parameter estimation
+        traj_length_in_time_ = 10.0;    
         ///////////////////////////////////////////////////////////////////////        
 
-        VectorXd ee_gain(6);
-        if (ee_offset_(0) != 0.0 | ee_offset_(1) != 0.0 | ee_offset_(2) != 0.0){         
-            if (!issimulation_) { //for real                
-                ee_gain << 100., 100., 100., 400., 400., 600.;                
-            }
-            else { //for simulation
-                // ee_gain << 500., 500., 500., 800., 800., 1000.;
-                ee_gain << 1000., 1000., 1000., 2000., 2000., 2000.;
-            }                        
+        VectorXd ee_gain(6);        
+        if (!issimulation_) { //for real                
+            ee_gain << 100., 100., 100., 400., 400., 600.;                
         }
-        else{
-            ee_gain << 100., 100., 100., 400., 400., 600.;
-            // ee_gain << 100., 100., 100., 200., 200., 200.;
-        }           
+        else { //for simulation
+            // ee_gain << 500., 500., 500., 800., 800., 1000.;
+            ee_gain << 1000., 1000., 1000., 2000., 2000., 2000.;
+        }                                
+        
         eeTask_ = std::make_shared<TaskSE3Equality>("task-se3", *robot_, "panda_joint7", ee_offset_); //here, ee_offset_ is applied to current pos value
         eeTask_->Kp(ee_gain*Vector::Ones(6));
-        eeTask_->Kd(2.0*eeTask_->Kp().cwiseSqrt());        
-        // eeTask_->Kd(0.5*eeTask_->Kp().cwiseSqrt());                        
+        // eeTask_->Kd(2.0*eeTask_->Kp().cwiseSqrt());        
+        eeTask_->Kd(1.0*eeTask_->Kp().cwiseSqrt());                        
 
         torqueBoundsTask_ = std::make_shared<TaskJointBounds>("task-torque-bounds", *robot_);
         Vector dq_max = 500000.0*Vector::Ones(na_);
@@ -151,13 +111,12 @@ namespace RobotController{
         torqueBoundsTask_->setJointBounds(dq_min, dq_max);        
 
         if (ismobile_) {
-            //mobile
-            mobileTask_ = std::make_shared<TaskMobileEquality>("task-mobile", *robot_, true);
+            mobileTask_ = std::make_shared<TaskMobileEquality>("task-mobile", *robot_, true); //ori
             mobileTask_->Kp(50.0*Vector3d::Ones());
             mobileTask_->Kd(2.5*mobileTask_->Kp().cwiseSqrt());
 
-            mobileTask2_ = std::make_shared<TaskMobileEquality>("task-mobile2", *robot_, false);
-            mobileTask2_->Kp(50.0*Vector3d::Ones());
+            mobileTask2_ = std::make_shared<TaskMobileEquality>("task-mobile2", *robot_, false); //trans
+            mobileTask2_->Kp(100.0*Vector3d::Ones());
             mobileTask2_->Kd(2.5*mobileTask2_->Kp().cwiseSqrt());
         }
 
@@ -178,6 +137,7 @@ namespace RobotController{
         trajEE_Timeopt_ = std::make_shared<TrajectorySE3Timeopt>("traj_ee_timeopt", Maxvel_ee, Maxacc_ee);
         
         if (ismobile_) {
+            sampleMobile_.resize(12, 6);
             trajMobile_Cubic_ = std::make_shared<TrajectorySE3Cubic>("traj_mobile");
             trajMobile_Constant_ = std::make_shared<TrajectorySE3Constant>("traj_mobile_constant");
             Vector3d Maxvel_base = Vector3d::Ones()*1.0;
@@ -190,15 +150,16 @@ namespace RobotController{
 
         // service
         reset_control_ = true; 
-        initial_calibration_update_ = false; 
-          
-        //trajectory length in time for object parameter estimation
-        traj_length_in_time_ = 10.0;              
+        initial_calibration_update_ = false;                 
 
         //inertia shaping --------------------------------//
         Me_inv_.resize(6,6);
         Me_inv_.setIdentity();                 
-        eeTask_->setDesiredinertia(Me_inv_);
+        eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+        if (ismobile_) {
+            mobileTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+            mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));
+        }
         //-----------------------------------------------//
 
         //Fh gain in global ------------------------------//
@@ -206,13 +167,107 @@ namespace RobotController{
         Fh_.setZero();                 
         
         //case.1 :use translational axis        
-        Fh_.topLeftCorner(3,3).setIdentity();                
+        // Fh_.topLeftCorner(3,3).setIdentity();                
         
-        //case. 2 : only use rx-axis to move z-axis 
-        // Fh_(2,3) = -0.4 * 5;        
-        
-        cout << Fh_ << endl;
+        //case.2 : only use rx-axis to move z-axis 
+        Fh_(2,3) = -1.0 * 4.0;     
         //-----------------------------------------------//
+        
+        //Fh gain in local ------------------------------//
+        Fh_local_.resize(6,6) ;        
+        Fh_local_.setZero();
+        
+        //case.1 : use local rz-axis to move local y-axis
+        Fh_local_(1,5) = -5.0;  
+        //-----------------------------------------------//
+
+        cout << " " << endl;
+        cout << "Fh_" << endl;
+        cout << Fh_ << endl;
+        cout << " " << endl;
+        cout << "Fh_local_" << endl;
+        cout << Fh_local_ << endl;    
+    }
+
+    void FrankaHuskyWrapper::EstimationMotion(){ 
+        //define hGr matrix in local coordinate
+        hGr_local_.resize(3,6);
+        hGr_local_.topLeftCorner(3,3).setIdentity();         
+        hGr_local_.topRightCorner(3,3) = -1 * skew_matrix(obj_length_local_);
+
+        cout << " " << endl;
+        cout << "hGr_local" << endl;
+        cout << hGr_local_ << endl;
+        
+        hGr_local_pinv_.resize(6,3);
+        hGr_local_pinv_ = hGr_local_.completeOrthogonalDecomposition().pseudoInverse();
+
+        cout << " " << endl;
+        cout << "hGr_local_pinv_" << endl;
+        cout << hGr_local_pinv_ << endl;
+
+        hGr_local_Null_.resize(6,6);
+        hGr_local_Null_ = MatrixXd::Identity(6,6) - hGr_local_pinv_* hGr_local_;
+
+        cout << " " << endl;
+        cout << "hGr_local_Null_" << endl;
+        cout << hGr_local_Null_ << endl;
+
+        //define P matrix
+        P_global_.resize(6,6);
+        P_global_.setIdentity();
+        P_global_.bottomLeftCorner(3,3) = -1*skew_matrix(obj_length_global_);        
+
+        P_local_.resize(6,6);
+        P_local_.setIdentity();
+        P_local_.bottomLeftCorner(3,3) = -1*skew_matrix(obj_length_local_);
+    }
+    
+    void FrankaHuskyWrapper::R_joint7(){ 
+        Matrix3d Rx, Ry, Rz;
+        double anglex, angley, anglez;         
+        if (isrobotiq_) {
+            anglex = -180.0*M_PI/180.0;
+            anglez =   90.0*M_PI/180.0;
+            this->rotx(anglex, Rx);
+            this->rotz(anglez, Rz);   
+            R_joint7_atHome_ = Rz * Rx;
+
+            anglex =  90.0*M_PI/180.0;            
+            anglez =  90.0*M_PI/180.0;
+            this->rotx(anglex, Rx);            
+            this->rotz(anglez, Rz);   
+            R_joint7_atTask_ = Rz * Rx;
+        }
+        else { //franka gripper
+            anglex = -180.0*M_PI/180.0;
+            anglez =   45.0*M_PI/180.0;
+            this->rotx(anglex, Rx);
+            this->rotz(anglez, Rz);   
+            R_joint7_atHome_ = Rz * Rx;
+
+            anglex =  90.0*M_PI/180.0;
+            angley = -45.0*M_PI/180.0;
+            anglez =  90.0*M_PI/180.0;
+            this->rotx(anglex, Rx);
+            this->roty(angley, Ry);
+            this->rotz(anglez, Rz);   
+            R_joint7_atTask_ = Rz * Ry * Rx;
+        }       
+        cout << " " << endl;
+        cout << "R_joint7_atHome_" << endl;
+        cout << R_joint7_atHome_ << endl;            
+    }
+
+    void FrankaHuskyWrapper::eeoffset_update(const MatrixXd& R_joint7){ 
+        ee_offset_ = R_joint7 * Vector3d(0.0, 0.0, -joint7_to_finger_); //global to local        
+
+        T_offset_.setIdentity();
+        T_offset_.translation(ee_offset_);                
+
+        Adj_mat_.resize(6,6);
+        Adj_mat_.setIdentity();
+        Adj_mat_.topRightCorner(3,3) = -1 * skew_matrix(ee_offset_); //due to "A cross B = -B cross A"
     }
 
     void FrankaHuskyWrapper::franka_update(const sensor_msgs::JointState& msg){ //for simulation (mujoco)
@@ -300,124 +355,10 @@ namespace RobotController{
         if (ctrl_mode_ == 0){ //g // gravity mode
             state_.torque_.setZero();
         }
+        
         if (ctrl_mode_ == 1){ //h //init position
-            if (mode_change_){                
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
-
-                tsid_->addMotionTask(*postureTask_, 1e-2, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-
-                q_ref_.setZero(7);
-                q_ref_(0) =  0;//M_PI /4.0;
-                q_ref_(1) = 0.0 * M_PI / 180.0;
-                q_ref_(3) = -M_PI / 2.0;
-                q_ref_(5) = M_PI/ 2.0;
-                q_ref_(6) = -M_PI/ 4.0;
-
-                if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-
-                trajPosture_Cubic_->setDuration(2.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);
-
-                reset_control_ = false;
-                mode_change_ = false;             
-            }            
-
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            //in here, task.compute is performed right after the reference is set.
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_); 
-
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
-
-        }                
-        if (ctrl_mode_ == 2){ //a //home and align base and joint7 coordinate
-            if (mode_change_){     
-                //remove                           
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
-
-                //add
-                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-
-                q_ref_.setZero(7);
-                q_ref_(0) =  0;//M_PI /4.0;
-                q_ref_(1) = 0.0 * M_PI / 180.0;
-                q_ref_(3) = - M_PI / 2.0;
-                q_ref_(5) = M_PI/ 2.0;
-                // q_ref_(6) = -M_PI/ 4.0;
-                q_ref_(6) = 0.0;
-
-                if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-
-                trajPosture_Cubic_->setDuration(2.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);
-
-                reset_control_ = false;
-                mode_change_ = false;                
-            }
-
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
-
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
-        }
-        if (ctrl_mode_ == 3){ //u 
-            if (mode_change_){                
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
-
-                tsid_->addMotionTask(*postureTask_, 1e-2, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-
-                q_ref_.setZero(7);
-                q_ref_(0) =  0.0;
-                q_ref_(1) =  0.2 * M_PI;
-                q_ref_(2) =  0.0;
-                q_ref_(3) = -0.5 * M_PI;
-                q_ref_(4) =  0.0;
-                q_ref_(5) =  1.1 * M_PI;
-                q_ref_(6) =  0.25 * M_PI;
-
-                if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-
-                trajPosture_Cubic_->setDuration(2.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);
-
-                reset_control_ = false;
-                mode_change_ = false;             
-            }            
-
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            //in here, task.compute is performed right after the reference is set.
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_); 
-
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
-
-        }   
-
-        if (ctrl_mode_ == 4){ //y //move mobile -0.1x with keeping ee
-            if (mode_change_){
-                //remove
+            if (mode_change_){ 
+                //remove               
                 tsid_->removeTask("task-mobile");
                 tsid_->removeTask("task-mobile2");
                 tsid_->removeTask("task-se3");
@@ -427,181 +368,45 @@ namespace RobotController{
                 //add
                 tsid_->addMotionTask(*postureTask_, 1e-6, 1);
                 tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-                tsid_->addMotionTask(*eeTask_, 1.0, 0);
-                tsid_->addMotionTask(*mobileTask2_, 1.0, 0);
+                
+                //offset update w.r.t. ee posture
+                this->eeoffset_update(R_joint7_atHome_);     
+                cout << "eeoffset is update to home position" << endl;
 
                 //posture
-                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                trajPosture_Cubic_->setDuration(2.0);
+                q_ref_.setZero(7);
+                q_ref_(0) =  0;//M_PI /4.0;
+                q_ref_(1) = 0.0 * M_PI / 180.0;
+                q_ref_(3) = -M_PI / 2.0;
+                q_ref_(5) = M_PI/ 2.0;
+                
+                if (isrobotiq_) q_ref_(6) = -M_PI/ 2.0;                
+                else            q_ref_(6) = -M_PI/ 4.0;                
+
+                if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
+
+                trajPosture_Cubic_->setDuration(3.0);
                 trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);
-
-                //ee
-                trajEE_Cubic_->setStartTime(time_);
-                trajEE_Cubic_->setDuration(2.0);
-                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
-                trajEE_Cubic_->setInitSample(H_ee_ref_);
-                trajEE_Cubic_->setGoalSample(H_ee_ref_);
-
-                //mobility
-                H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
-
-                trajMobile_Cubic_->setStartTime(time_);
-                trajMobile_Cubic_->setDuration(2.0);
-                trajMobile_Cubic_->setInitSample(H_mobile_ref_);
-                H_mobile_ref_.translation()(0) -= 0.1;
-                trajMobile_Cubic_->setGoalSample(H_mobile_ref_);
+                trajPosture_Cubic_->setGoalSample(q_ref_);                
 
                 reset_control_ = false;
-                mode_change_ = false;
-            }
-
-            // husky
-            trajMobile_Constant_->setReference(H_mobile_ref_);
-            sampleMobile_ = trajMobile_Constant_->computeNext();
-            mobileTask2_->setReference(sampleMobile_);
+                mode_change_ = false;             
+            } 
 
             trajPosture_Cubic_->setCurrentTime(time_);
             samplePosture_ = trajPosture_Cubic_->computeNext();
             postureTask_->setReference(samplePosture_);
 
-            trajEE_Cubic_->setCurrentTime(time_);
-            sampleEE_ = trajEE_Cubic_->computeNext();
-            eeTask_->setReference(sampleEE_);
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_); 
             state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
-        }
+        }          
 
-        if (ctrl_mode_ == 11){ //w //rotate ee for object estimation in -y aixs
+        if (ctrl_mode_ == 11){ //w //rotate ee in null space motion for object estimation
             if (mode_change_){
-                //remove                
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
-
-                //add
-                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-                tsid_->addMotionTask(*eeTask_, 1.0, 0);                
-
-                //posture
-                if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-
-                trajPosture_Cubic_->setDuration(2.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);
-
-                //ee
-                trajEE_Cubic_->setStartTime(time_);
-                trajEE_Cubic_->setDuration(2.0);                
-
-                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
-                trajEE_Cubic_->setInitSample(H_ee_ref_); 
-                cout << "initial" << endl;
-                cout << H_ee_ref_ << endl;                
-
-                Matrix3d Rx, Ry, Rz;
-                Rx.setIdentity();
-                Ry.setIdentity();                
-                double angle = 15.0*M_PI/180.0;
-                double anglex = -angle;
-                double angley = angle; //Both x&y is applied because joint7 is rotate pi/4 w.r.t. global coordinate.
-                rotx(anglex, Rx);
-                roty(angley, Ry);                
-                
-                SE3 T_rot;
-                T_rot.setIdentity();
-                T_rot.rotation(Rx*Ry);                                                
-                
-                H_ee_ref_ = H_ee_ref_ * T_rot;                                                                
-                trajEE_Cubic_->setGoalSample(H_ee_ref_);
-                cout << "goal" << endl;
-                cout << H_ee_ref_ << endl;
-
-                reset_control_ = false;
-                mode_change_ = false;
-            }
-           
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            trajEE_Cubic_->setCurrentTime(time_);
-            sampleEE_ = trajEE_Cubic_->computeNext();
-            eeTask_->setReference(sampleEE_);
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));            
-        }        
-
-        if (ctrl_mode_ == 12){ //r //rotate ee for object estimation in -x axis
-            if (mode_change_){
-                //remove                
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
-
-                //add
-                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-                tsid_->addMotionTask(*eeTask_, 1.0, 0);                
-
-                //posture
-                if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-
-                trajPosture_Cubic_->setDuration(2.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);
-
-                //ee
-                trajEE_Cubic_->setStartTime(time_);
-                trajEE_Cubic_->setDuration(2.0);                
-
-                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;
-                trajEE_Cubic_->setInitSample(H_ee_ref_); 
-                cout << "initial" << endl;
-                cout << H_ee_ref_ << endl;                
-
-                Matrix3d Rx, Ry, Rz;
-                Rx.setIdentity();
-                Ry.setIdentity();                
-                double angle = 15.0*M_PI/180.0;
-                double anglex = -angle;
-                double angley = -angle; //Both x&y is applied because joint7 is rotate pi/4 w.r.t. global coordinate.
-                rotx(anglex, Rx);
-                roty(angley, Ry);                
-                
-                SE3 T_rot;
-                T_rot.setIdentity();
-                T_rot.rotation(Rx*Ry);                                                
-                
-                H_ee_ref_ = H_ee_ref_ * T_rot;                                                                
-                trajEE_Cubic_->setGoalSample(H_ee_ref_);
-                cout << "goal" << endl;
-                cout << H_ee_ref_ << endl;
-
-                reset_control_ = false;
-                mode_change_ = false;
-            }
-           
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            trajEE_Cubic_->setCurrentTime(time_);
-            sampleEE_ = trajEE_Cubic_->computeNext();
-            eeTask_->setReference(sampleEE_);
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));            
-        }   
-
-        if (ctrl_mode_ == 13){ //t //rotate ee with sine motion for object estimation
-            if (mode_change_){
-                //remove                
+                //remove  
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");              
                 tsid_->removeTask("task-se3");
                 tsid_->removeTask("task-posture");
                 tsid_->removeTask("task-torque-bounds");
@@ -620,185 +425,112 @@ namespace RobotController{
                 trajPosture_Cubic_->setGoalSample(q_ref_);
 
                 //ee
-                trajEE_Cubic_->setStartTime(time_);
-                trajEE_Cubic_->setDuration(2.0);
-                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
+                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_; 
 
-                trajEE_Cubic_->setInitSample(H_ee_ref_);
-                trajEE_Cubic_->setGoalSample(H_ee_ref_);
-               
-                reset_control_ = false;
-                mode_change_ = false;
+                //mobility                
+                if (ismobile_) { 
+                    target_time_ = traj_length_in_time_;
 
-                est_time_ = time_;
-            }       
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);                    
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));        
 
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            //////////////////
-            trajEE_Cubic_->setCurrentTime(time_);
-            sampleEE_ = trajEE_Cubic_->computeNext(); //TrajectorySample
-            // eeTask_->setReference(sampleEE_); //TaskSE3Equality
-
-            TrajectorySample m_sample;
-            m_sample.resize(12, 6); //pos 12, vel 6, pos : translation 3 + rotation matrix 9
-            m_sample = sampleEE_;   //take current pos
-
-            if (time_ - est_time_ < 10.0){
-                Matrix3d Rx, Ry, Rz;
-                Rx.setIdentity();
-                Ry.setIdentity();
-                Rz.setIdentity();
-                double anglex = -10*M_PI/180.0*sin(0.4*M_PI*(time_ - est_time_));
-                double angley = -10*M_PI/180.0*sin(0.4*M_PI*(time_ - est_time_));
-                rotx(anglex, Rx);
-                roty(angley, Ry);
-
-                SE3 T_rot;
-                T_rot.setIdentity();
-                T_rot.rotation(Rx*Ry);
-
-                pinocchio::SE3 H_EE_ref_estimation;
-                H_EE_ref_estimation = H_ee_ref_;                
-                H_EE_ref_estimation = H_EE_ref_estimation * T_rot;                
-
-                SE3ToVector(H_EE_ref_estimation, m_sample.pos);
-            }
-
-            eeTask_->setReference(m_sample);
-            //////////////////
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
-        }   
-
-        if (ctrl_mode_ == 14){ //e //rotate ee in null space motion for object estimation
-            if (mode_change_){
-                //remove                
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
-
-                //add
-                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-                tsid_->addMotionTask(*eeTask_, 1.0, 0);
-
-                //posture
-                if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-
-                trajPosture_Cubic_->setDuration(2.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);
-
-                //ee
-                trajEE_Cubic_->setStartTime(time_);
-                trajEE_Cubic_->setDuration(2.0);
-                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
-
-                trajEE_Cubic_->setInitSample(H_ee_ref_);
-                trajEE_Cubic_->setGoalSample(H_ee_ref_);
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(target_time_);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_); 
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);  
+                }
                
                 reset_control_ = false;
                 mode_change_ = false;
                 trjectory_end_ = false;
                 
                 est_time_ = time_;
-
                 T_vel_.setIdentity();
 
                 if (getcalibration_){
-                    fout_.open("/home/kimm/kimm_catkin/src/kimm_phri_panda/calibration/calibration_data_xy_w_y5deg.txt");
+                    fout_.open("/home/kimm/kimm_catkin/src/kimm_phri_panda_husky/calibration/calibration.txt");
                 }
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask2_->setReference(sampleMobile_);
             }
             
             trajPosture_Cubic_->setCurrentTime(time_);
             samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);            
-
+            postureTask_->setReference(samplePosture_);                        
             ////////////////// 
-            if (time_ - est_time_ < traj_length_in_time_){              
-                // double anglex = -5*M_PI/180.0*0.4*M_PI*cos(0.4*M_PI*(time_ - est_time_));
-                // double angley = -5*M_PI/180.0*0.4*M_PI*cos(0.4*M_PI*(time_ - est_time_));
 
-                double f = 0.4;
-                // double anglex = -5*M_PI/180.0*2.0*M_PI*f*cos(2.0*M_PI*f*(time_ - est_time_));
-                // double angley = -5*M_PI/180.0*2.0*M_PI*f*cos(2.0*M_PI*f*(time_ - est_time_));
+            VectorXd vel_vec, vel_vec_pseudo, vel_vec_null, vel_vec_null_forpseudo;            
+            vel_vec.resize(6);
+            vel_vec_pseudo.resize(3);   
+            vel_vec_null.resize(6);                                
+            vel_vec_null_forpseudo.resize(6);                                           
+            if (time_ - est_time_ < target_time_){  
+                //for pseudo motion----------------------------------------------------------//                
+                vel_vec_pseudo << 0.0, 0.0, 0.0;                
 
-                //to make global -x axis (5deg) & -y axis (5deg)
-                double anglex = -5*M_PI/180.0*2.0*M_PI*f*cos(2.0*M_PI*f*(time_ - est_time_)) -3*M_PI/180.0*2.0*M_PI*f*cos(2.0*M_PI*f*(time_ - est_time_));
-                double angley = -5*M_PI/180.0*2.0*M_PI*f*cos(2.0*M_PI*f*(time_ - est_time_)) +3*M_PI/180.0*2.0*M_PI*f*cos(2.0*M_PI*f*(time_ - est_time_));
+                //vel_vec_pseudo should be used here to eliminate rx motion in pseudo motion. see the relation of matrix hGr_local_pinv_ and hGr_local_Null_
+                vel_vec_null_forpseudo << 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;                  
+                //---------------------------------------------------------------------------//                
 
-
-                VectorXd vel_vec, vel_vec_pseudo, vel_vec_null;
-                
-                vel_vec_pseudo.resize(3);                
-                if (getcalibration_){
-                    vel_vec_pseudo << 0.0, 0.0, 0.0;
-                }
-                else {
-                    vel_vec_pseudo  = R_joint7_atHome_ * Vector3d(-0.00, 0.0, 0.0); // -0.01 m/s in global x axis
-                }
-
-                vel_vec_null.resize(6);
-                vel_vec_null << 0.0, 0.0, 0.0, anglex, angley, 0.0;
-                
-                vel_vec.resize(6);
-                vel_vec = hGr_local_pinv_ * vel_vec_pseudo + hGr_local_Null_ * vel_vec_null;
-
-                T_vel_ = T_vel_ * vel_to_SE3(vel_vec, dt_);   //velocity integration to make position
-
-                pinocchio::SE3 H_EE_ref_estimation;
-                H_EE_ref_estimation = H_ee_ref_;                
-                H_EE_ref_estimation = H_EE_ref_estimation * T_vel_;                
-
-                SE3ToVector(H_EE_ref_estimation, sampleEE_.pos);
-
-                if (getcalibration_){
-                    fout_ << Fext_.transpose() << "\n";
-                }
-            }
-            else{                
-                // maintain current pos after the trajectory is finished --------------------------------//
-                // if (!trjectory_end_){
-                //     H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
-                //     SE3ToVector(H_ee_ref_, sampleEE_.pos); //main current pos
-                //     trjectory_end_ = true;
-                //
-                //        // if (getcalibration__{
-                //        //     fout_.close();   
-                //        // }       
-                // }
-                // else {
-                //     SE3ToVector(H_ee_ref_, sampleEE_.pos); 
-                // }             
-                // ------------------------------------------------------------------------------------//
-                
-                // maintain zero velocity after the trajectory is finished to avoid hard stop -----------//
-                if (!trjectory_end_){                    
-                    trjectory_end_ = true;
+                //for null motion------------------------------------------------------------//
+                if (time_ - est_time_ < traj_length_in_time_){                                        
+                    double fx = 0.4;                                
+                    double fy = 0.4;                                
+                    double fz = 0.4;                                
+                    if (isrobotiq_) { 
+                        //to make global -x axis (5deg) & -y axis (3deg)
+                        double anglex = -5*M_PI/180.0*2.0*M_PI*fx*cos(2.0*M_PI*fx*(time_ - est_time_));
+                        double angley = -5*M_PI/180.0*2.0*M_PI*fy*cos(2.0*M_PI*fy*(time_ - est_time_));
+                        double anglez = -5*M_PI/180.0*2.0*M_PI*fz*cos(2.0*M_PI*fz*(time_ - est_time_));                        
+                        // double anglez = 0.0;                        
                     
-                    if (getcalibration_) {
-                        fout_.close();          
+                        vel_vec_null << 0.0, 0.0, 0.0, anglex, angley, anglez; //joint7 is 90deg rotated w.r.t. global coordinate
                     }
+                    else {
+                        //to make global -x axis (5deg) & -y axis (3deg)
+                        double anglex = -5*M_PI/180.0*2.0*M_PI*fx*cos(2.0*M_PI*fx*(time_ - est_time_)) -3*M_PI/180.0*2.0*M_PI*fy*cos(2.0*M_PI*fy*(time_ - est_time_));
+                        double angley = -5*M_PI/180.0*2.0*M_PI*fx*cos(2.0*M_PI*fx*(time_ - est_time_)) +3*M_PI/180.0*2.0*M_PI*fy*cos(2.0*M_PI*fy*(time_ - est_time_));                                            
+                        
+                        vel_vec_null << 0.0, 0.0, 0.0, anglex, angley, 0.0;
+                    }
+
+                    if (getcalibration_){
+                    fout_ << Fext_.transpose() << "\n";
+                    }                                
                 }
-
-                VectorXd vel_vec;
-                vel_vec.resize(6);
-                vel_vec.setZero();                
-
-                T_vel_ = T_vel_ * vel_to_SE3(vel_vec, dt_);   //velocity integration to make position
-
-                pinocchio::SE3 H_EE_ref_estimation;
-                H_EE_ref_estimation = H_ee_ref_;                
-                H_EE_ref_estimation = H_EE_ref_estimation * T_vel_;                
-
-                SE3ToVector(H_EE_ref_estimation, sampleEE_.pos);
+                else { //when estimation is finished
+                    if (!trjectory_end_){                    
+                        trjectory_end_ = true;
+                        
+                        if (getcalibration_) {
+                            fout_.close();          
+                        }
+                    }
+                    vel_vec_null.setZero();
+                }
+                //---------------------------------------------------------------------------//                
+                    
+                vel_vec = hGr_local_pinv_ * vel_vec_pseudo + hGr_local_Null_ * (vel_vec_null_forpseudo + vel_vec_null);                
+            }
+            else{  //when pseudo motion is end                
+                // maintain zero velocity after the trajectory is finished to avoid hard stop -----------//                                                
+                vel_vec.setZero();                                
                 // ------------------------------------------------------------------------------------//
             }
+
+            T_vel_ = T_vel_ * vel_to_SE3(vel_vec, dt_);   //velocity integration to make position
+            pinocchio::SE3 H_EE_ref_estimation;
+            H_EE_ref_estimation = H_ee_ref_;                
+            H_EE_ref_estimation = H_EE_ref_estimation * T_vel_;                
+            SE3ToVector(H_EE_ref_estimation, sampleEE_.pos);
 
             eeTask_->setReference(sampleEE_);
             //////////////////
@@ -807,9 +539,11 @@ namespace RobotController{
             state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
         }   
 
-        if (ctrl_mode_ == 21){ //c //admittance control
+        if (ctrl_mode_ == 101){ //1 //rotate ee in null space motion for object estimation
             if (mode_change_){
-                //remove                
+                //remove  
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");              
                 tsid_->removeTask("task-se3");
                 tsid_->removeTask("task-posture");
                 tsid_->removeTask("task-torque-bounds");
@@ -828,12 +562,346 @@ namespace RobotController{
                 trajPosture_Cubic_->setGoalSample(q_ref_);
 
                 //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
+                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_; 
+
+                //mobility                
+                if (ismobile_) { 
+                    target_time_ = traj_length_in_time_;
+
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);                    
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));        
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(target_time_);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_); 
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);  
+                }
+               
+                reset_control_ = false;
+                mode_change_ = false;
+                trjectory_end_ = false;
+                
+                est_time_ = time_;
+                T_vel_.setIdentity();                
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask2_->setReference(sampleMobile_);
+            }
+            
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);                        
+            ////////////////// 
+
+            VectorXd vel_vec, vel_vec_pseudo, vel_vec_null, vel_vec_null_forpseudo;            
+            vel_vec.resize(6);
+            vel_vec_pseudo.resize(3);   
+            vel_vec_null.resize(6);                                
+            vel_vec_null_forpseudo.resize(6);                                           
+            if (time_ - est_time_ < target_time_){  
+                //for pseudo motion----------------------------------------------------------//                
+                vel_vec_pseudo << 0.0, 0.0, 0.0;                
+
+                //vel_vec_pseudo should be used here to eliminate rx motion in pseudo motion. see the relation of matrix hGr_local_pinv_ and hGr_local_Null_
+                vel_vec_null_forpseudo << 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;                  
+                //---------------------------------------------------------------------------//                
+
+                //for null motion------------------------------------------------------------//
+                if (time_ - est_time_ < traj_length_in_time_){                                        
+                    double fx = 0.4;                                
+                    double fy = 0.4;                                
+                    double fz = 0.4;                                
+                    if (isrobotiq_) { 
+                        //to make global -x axis (5deg) & -y axis (3deg)
+                        double anglex = -5*M_PI/180.0*2.0*M_PI*fx*cos(2.0*M_PI*fx*(time_ - est_time_));
+                        double angley = -5*M_PI/180.0*2.0*M_PI*fy*cos(2.0*M_PI*fy*(time_ - est_time_));
+                        double anglez = -5*M_PI/180.0*2.0*M_PI*fz*cos(2.0*M_PI*fz*(time_ - est_time_));                        
+                        // double anglez = 0.0;                        
+                    
+                        vel_vec_null << 0.0, 0.0, 0.0, anglex, angley, anglez; //joint7 is 90deg rotated w.r.t. global coordinate
+                    }
+                    else {
+                        //to make global -x axis (5deg) & -y axis (3deg)
+                        double anglex = -5*M_PI/180.0*2.0*M_PI*fx*cos(2.0*M_PI*fx*(time_ - est_time_)) -3*M_PI/180.0*2.0*M_PI*fy*cos(2.0*M_PI*fy*(time_ - est_time_));
+                        double angley = -5*M_PI/180.0*2.0*M_PI*fx*cos(2.0*M_PI*fx*(time_ - est_time_)) +3*M_PI/180.0*2.0*M_PI*fy*cos(2.0*M_PI*fy*(time_ - est_time_));                                            
+                        
+                        vel_vec_null << 0.0, 0.0, 0.0, anglex, angley, 0.0;
+                    }                    
+                }
+                else { //when estimation is finished
+                    if (!trjectory_end_){                    
+                        trjectory_end_ = true;                     
+                    }
+                    vel_vec_null.setZero();
+                }
+                //---------------------------------------------------------------------------//                
+                    
+                // vel_vec = hGr_local_pinv_ * vel_vec_pseudo + hGr_local_Null_ * (vel_vec_null_forpseudo + vel_vec_null);                
+                vel_vec = vel_vec_null;
+            }
+            else{  //when pseudo motion is end                
+                // maintain zero velocity after the trajectory is finished to avoid hard stop -----------//                                                
+                vel_vec.setZero();                                
+                // ------------------------------------------------------------------------------------//
+            }
+
+            T_vel_ = T_vel_ * vel_to_SE3(vel_vec, dt_);   //velocity integration to make position
+            pinocchio::SE3 H_EE_ref_estimation;
+            H_EE_ref_estimation = H_ee_ref_;                
+            H_EE_ref_estimation = H_EE_ref_estimation * T_vel_;                
+            SE3ToVector(H_EE_ref_estimation, sampleEE_.pos);
+
+            eeTask_->setReference(sampleEE_);
+            //////////////////
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
+        }                       
+
+        if (ctrl_mode_ == 12){ //e //rotate ee in null space motion for object estimation
+            if (mode_change_){
+                //remove  
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");              
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                tsid_->addMotionTask(*eeTask_, 1.0, 0);
+
+                //posture
+                if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
+
+                trajPosture_Cubic_->setDuration(2.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                trajPosture_Cubic_->setGoalSample(q_ref_);
+
+                //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);                
+                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;
+
+                //mobility                
+                if (ismobile_) {                    
+                    target_distance_ = 1.5;
+                    target_time_ = 15.0;
+                    // target_velocity_ = target_distance_ / target_time_;                                        
+                    
+                    //*----- Use of mobileTask and eeTask together diverge (why?) -----*//
+                    // tsid_->addMotionTask(*mobileTask_, 1.0, 1);                                        
+                    // mobileTask_->setDesiredinertia(MatrixXd::Identity(6,6));     
+
+                    tsid_->addMotionTask(*mobileTask2_, 0.1, 1);
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));                         
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(target_time_);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_); 
+
+                    H_mobile_ref_.translation()(0) += target_distance_;                   
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);  
+                }
+               
+                reset_control_ = false;
+                mode_change_ = false;
+                trjectory_end_ = false;
+                
+                est_time_ = time_;
+                T_vel_.setIdentity();                
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                // mobileTask_->setReference(sampleMobile_);                                
+                mobileTask2_->setReference(sampleMobile_);                                
+            }
+            
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);                        
+            ////////////////// 
+
+            VectorXd vel_vec, vel_vec_pseudo, vel_vec_null, vel_vec_null_forpseudo;            
+            vel_vec.resize(6);
+            vel_vec_pseudo.resize(3);   
+            vel_vec_null.resize(6);                                
+            vel_vec_null_forpseudo.resize(6);                                           
+            if (time_ - est_time_ < target_time_){  
+                //for pseudo motion----------------------------------------------------------//                
+                //constant velocity
+                // vel_vec_pseudo  = R_joint7_atHome_ * Vector3d(target_velocity_, 0.0, 0.0); // -0.01 m/s in global x axis
+                
+                //cubic velocity
+                double a1, a2, vel_tra;
+                a1 = +6.0 / pow(target_time_, 2) * target_distance_;
+                a2 = -6.0 / pow(target_time_, 3) * target_distance_;
+                vel_tra = a1 * (time_ - est_time_) + a2 * pow(time_ - est_time_, 2);
+                vel_vec_pseudo  = R_joint7_atHome_ * Vector3d(vel_tra, 0.0, 0.0); // -0.01 m/s in global x axis                
+
+                //vel_vec_pseudo should be used here to eliminate rx motion in pseudo motion. see the relation of matrix hGr_local_pinv_ and hGr_local_Null_
+                vel_vec_null_forpseudo << vel_vec_pseudo(0), vel_vec_pseudo(1), 0.0, 0.0, 0.0, 0.0;                  
+                //---------------------------------------------------------------------------//                
+
+                //for null motion------------------------------------------------------------//
+                if (time_ - est_time_ < traj_length_in_time_){                                        
+                    double fx = 0.4;                                
+                    double fy = 0.4;                                
+                    double fz = 0.4;                                
+                    if (isrobotiq_) { 
+                        //to make global -x axis (5deg) & -y axis (3deg)
+                        double anglex = -5*M_PI/180.0*2.0*M_PI*fx*cos(2.0*M_PI*fx*(time_ - est_time_));
+                        double angley = -5*M_PI/180.0*2.0*M_PI*fy*cos(2.0*M_PI*fy*(time_ - est_time_));
+                        double anglez = -5*M_PI/180.0*2.0*M_PI*fz*cos(2.0*M_PI*fz*(time_ - est_time_));                        
+                        // double anglez = 0.0;                        
+                    
+                        vel_vec_null << 0.0, 0.0, 0.0, anglex, angley, anglez;
+                    }
+                    else {
+                        //to make global -x axis (5deg) & -y axis (3deg)
+                        double anglex = -5*M_PI/180.0*2.0*M_PI*fx*cos(2.0*M_PI*fx*(time_ - est_time_)) -3*M_PI/180.0*2.0*M_PI*fy*cos(2.0*M_PI*fy*(time_ - est_time_));
+                        double angley = -5*M_PI/180.0*2.0*M_PI*fx*cos(2.0*M_PI*fx*(time_ - est_time_)) +3*M_PI/180.0*2.0*M_PI*fy*cos(2.0*M_PI*fy*(time_ - est_time_));                                            
+                        
+                        vel_vec_null << 0.0, 0.0, 0.0, anglex, angley, 0.0;
+                    }                    
+                }
+                else { //when estimation is finished
+                    if (!trjectory_end_){                    
+                        trjectory_end_ = true;                                             
+                    }
+                    vel_vec_null.setZero();
+                }
+                //---------------------------------------------------------------------------//                
+                    
+                vel_vec = hGr_local_pinv_ * vel_vec_pseudo + hGr_local_Null_ * (vel_vec_null_forpseudo + vel_vec_null);                
+            }
+            else{  //when pseudo motion is end                
+                // maintain zero velocity after the trajectory is finished to avoid hard stop -----------//                                                
+                vel_vec.setZero();                                
+                // ------------------------------------------------------------------------------------//
+            }
+
+            T_vel_ = T_vel_ * vel_to_SE3(vel_vec, dt_);   //velocity integration to make position
+            pinocchio::SE3 H_EE_ref_estimation;
+            H_EE_ref_estimation = H_ee_ref_;                
+            H_EE_ref_estimation = H_EE_ref_estimation * T_vel_;                
+            SE3ToVector(H_EE_ref_estimation, sampleEE_.pos);
+
+            eeTask_->setReference(sampleEE_);
+            //////////////////
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
+        }          
+
+        if (ctrl_mode_ == 13){ //r //move ee -0.2x & -0.2z
+            if (mode_change_){
+                //remove         
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");       
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-16, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                tsid_->addMotionTask(*eeTask_, 1.0, 0);
+
+                //posture 
+                if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
+
+                trajPosture_Cubic_->setDuration(2.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                
+                if (ismobile_) trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_-2));
+                else           trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
+
+                //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
+                trajEE_Cubic_->setStartTime(time_);
+                trajEE_Cubic_->setDuration(2.0);
+
+                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                                                
+                trajEE_Cubic_->setInitSample(H_ee_ref_);
+                H_ee_ref_.translation()(0) += 0.3;                                
+                H_ee_ref_.translation()(2) -= 0.1;                
+                trajEE_Cubic_->setGoalSample(H_ee_ref_);
+                
+                reset_control_ = false;
+                mode_change_ = false;                
+            }            
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);
+
+            trajEE_Cubic_->setCurrentTime(time_);
+            sampleEE_ = trajEE_Cubic_->computeNext();
+            eeTask_->setReference(sampleEE_);
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));            
+        }
+
+        if (ctrl_mode_ == 21){ //c //admittance control
+            if (mode_change_){
+                //remove      
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");          
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                tsid_->addMotionTask(*eeTask_, 1.0, 0);
+
+                //posture
+                if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
+
+                trajPosture_Cubic_->setDuration(2.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                trajPosture_Cubic_->setGoalSample(q_ref_);
+
+                //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
 
                 trajEE_Cubic_->setInitSample(H_ee_ref_);
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
+
+                //mobility                
+                if (ismobile_) {                    
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);                    
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));        
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(2.0);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_);                    
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);   
+                }
                
                 reset_control_ = false;
                 mode_change_ = false;
@@ -844,6 +912,13 @@ namespace RobotController{
                 //damping gain for addmittance control
                 Dinv_gain_ << 0.01, 0.01, 0.01, 0.01, 0.01, 0.03; 
                 Dinv_gain_ *= dt_;
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask2_->setReference(sampleMobile_);
             }
             
             trajPosture_Cubic_->setCurrentTime(time_);
@@ -914,7 +989,9 @@ namespace RobotController{
 
         if (ctrl_mode_ == 22){ //v //impedance control
             if (mode_change_){
-                //remove                
+                //remove      
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");          
                 tsid_->removeTask("task-se3");
                 tsid_->removeTask("task-posture");
                 tsid_->removeTask("task-torque-bounds");                
@@ -933,6 +1010,8 @@ namespace RobotController{
                 trajPosture_Cubic_->setGoalSample(q_ref_);
 
                 //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
@@ -940,16 +1019,16 @@ namespace RobotController{
                 trajEE_Cubic_->setInitSample(H_ee_ref_);
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);   
 
-                if (ismobile_) {
-                    tsid_->removeTask("task-mobile");
-                    tsid_->removeTask("task-mobile2");
-                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);
+                //mobility
+                if (ismobile_) {                    
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);                    
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));        
 
                     H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
                     trajMobile_Cubic_->setStartTime(time_);
                     trajMobile_Cubic_->setDuration(2.0);
                     trajMobile_Cubic_->setInitSample(H_mobile_ref_);
-                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);          
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);     
                 }
                
                 reset_control_ = false;
@@ -958,8 +1037,8 @@ namespace RobotController{
 
             if (ismobile_) {
                 // husky
-                trajMobile_Constant_->setReference(H_mobile_ref_);
-                sampleMobile_ = trajMobile_Constant_->computeNext();
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
                 mobileTask2_->setReference(sampleMobile_);
             }
             
@@ -974,6 +1053,7 @@ namespace RobotController{
                 //inertia shaping    
                 // Me_inv_ = 
                 eeTask_->setDesiredinertia(Me_inv_);
+                eeTask_->setEEoffset(ee_offset_);
             }
             else {   
                 //to make K(x-xd)=0, put K=0 
@@ -994,49 +1074,75 @@ namespace RobotController{
 
         if (ctrl_mode_ == 23){ //m //impedance control with K 
             if (mode_change_){
+                //remove
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");
                 tsid_->removeTask("task-se3");
                 tsid_->removeTask("task-posture");
                 tsid_->removeTask("task-torque-bounds");
 
-                // tsid_->addMotionTask(*postureTask_, 1e-2, 1);
-                // tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
                 tsid_->addMotionTask(*eeTask_, 1, 0);
 
-                // if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
-                // else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
+                //posture
+                if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
 
-                // trajPosture_Cubic_->setDuration(1.0);
-                // trajPosture_Cubic_->setStartTime(time_);
-                // trajPosture_Cubic_->setGoalSample(q_ref_);    
+                trajPosture_Cubic_->setDuration(1.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                trajPosture_Cubic_->setGoalSample(q_ref_);    
 
+                //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;
                 trajEE_Cubic_->setInitSample(H_ee_ref_);
                 trajEE_Cubic_->setDuration(3.0);
                 trajEE_Cubic_->setStartTime(time_);                                
-                trajEE_Cubic_->setGoalSample(H_ee_ref_);
-               
-                // q_ref_ = state_.q_;       
+                trajEE_Cubic_->setGoalSample(H_ee_ref_);               
+
+                //mobility                
+                if (ismobile_) {                    
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);                    
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));        
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(2.0);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_);                    
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);  
+                }
 
                 reset_control_ = false;
                 mode_change_ = false;     
             }
-            trajEE_Cubic_->setCurrentTime(time_);
-            sampleEE_ = trajEE_Cubic_->computeNext();    
-              
-            // SE3 H_ee_ref;
-            // H_ee_ref = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;
-            // sampleEE_.pos.head(2) = H_ee_ref.translation().head(2);               
-            // sampleEE_.pos.head(3) = H_ee_ref.translation().head(3);               
-            
-            eeTask_->setReference(sampleEE_);                        
 
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);       
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask2_->setReference(sampleMobile_);
+            } 
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);
+
+            trajEE_Cubic_->setCurrentTime(time_);
+            sampleEE_ = trajEE_Cubic_->computeNext();
+            eeTask_->setReference(sampleEE_);
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));   
         }
 
         if (ctrl_mode_ == 31){ //i //move ee +0.1z
             if (mode_change_){
-                //remove                
+                //remove      
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");          
                 tsid_->removeTask("task-se3");
                 tsid_->removeTask("task-posture");
                 tsid_->removeTask("task-torque-bounds");
@@ -1046,7 +1152,7 @@ namespace RobotController{
                 tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
                 tsid_->addMotionTask(*eeTask_, 1.0, 0);
 
-                //posture (try to maintain current joint configuration)
+                //posture
                 if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
                 else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
 
@@ -1057,6 +1163,8 @@ namespace RobotController{
                 else           trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
 
                 //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
 
@@ -1065,8 +1173,27 @@ namespace RobotController{
                 H_ee_ref_.translation()(2) += 0.1;                
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
 
+                //mobility                
+                if (ismobile_) {                    
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);                    
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));        
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(2.0);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_);                    
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);    
+                }
+
                 reset_control_ = false;
                 mode_change_ = false;                
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask2_->setReference(sampleMobile_);
             }
 
             trajPosture_Cubic_->setCurrentTime(time_);
@@ -1081,9 +1208,11 @@ namespace RobotController{
             state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));   
         }     
 
-        if (ctrl_mode_ == 32){ //j //move ee -0.1z
+        if (ctrl_mode_ == 32){ //k //move ee -0.1z
             if (mode_change_){
-                //remove                
+                //remove      
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");          
                 tsid_->removeTask("task-se3");
                 tsid_->removeTask("task-posture");
                 tsid_->removeTask("task-torque-bounds");
@@ -1093,7 +1222,7 @@ namespace RobotController{
                 tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
                 tsid_->addMotionTask(*eeTask_, 1.0, 0);
 
-                //posture (try to maintain current joint configuration)
+                //posture 
                 if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
                 else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
 
@@ -1104,6 +1233,8 @@ namespace RobotController{
                 else           trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
 
                 //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
 
@@ -1112,8 +1243,27 @@ namespace RobotController{
                 H_ee_ref_.translation()(2) -= 0.1;                
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
 
+                //mobility                
+                if (ismobile_) {                    
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);                    
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));        
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(2.0);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_);                    
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_); 
+                }
+
                 reset_control_ = false;
                 mode_change_ = false;                
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask2_->setReference(sampleMobile_);
             }
 
             trajPosture_Cubic_->setCurrentTime(time_);
@@ -1130,7 +1280,9 @@ namespace RobotController{
 
         if (ctrl_mode_ == 33){ //l //move ee +0.1x
             if (mode_change_){
-                //remove                
+                //remove        
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");        
                 tsid_->removeTask("task-se3");
                 tsid_->removeTask("task-posture");
                 tsid_->removeTask("task-torque-bounds");
@@ -1140,7 +1292,7 @@ namespace RobotController{
                 tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
                 tsid_->addMotionTask(*eeTask_, 1.0, 0);
 
-                //posture (try to maintain current joint configuration)
+                //posture 
                 if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
                 else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
 
@@ -1151,6 +1303,8 @@ namespace RobotController{
                 else           trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
 
                 //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
 
@@ -1159,8 +1313,27 @@ namespace RobotController{
                 H_ee_ref_.translation()(0) += 0.1;                
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
 
+                //mobility                
+                if (ismobile_) {                    
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);                    
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));        
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(2.0);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_);                    
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);   
+                }
+
                 reset_control_ = false;
                 mode_change_ = false;                
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask2_->setReference(sampleMobile_);
             }
 
             trajPosture_Cubic_->setCurrentTime(time_);
@@ -1177,7 +1350,79 @@ namespace RobotController{
 
         if (ctrl_mode_ == 34){ //j //move ee -0.1x
             if (mode_change_){
-                //remove                
+                //remove         
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");       
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-16, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                tsid_->addMotionTask(*eeTask_, 1.0, 0);
+
+                //posture 
+                if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
+
+                trajPosture_Cubic_->setDuration(2.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                
+                if (ismobile_) trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_-2));
+                else           trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
+
+                //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
+                trajEE_Cubic_->setStartTime(time_);
+                trajEE_Cubic_->setDuration(2.0);
+
+                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                                                
+                trajEE_Cubic_->setInitSample(H_ee_ref_);
+                H_ee_ref_.translation()(0) -= 0.1;                
+                trajEE_Cubic_->setGoalSample(H_ee_ref_);
+
+                //mobility                
+                if (ismobile_) {                    
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);                    
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));        
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(2.0);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_);                    
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);   
+                }
+
+                reset_control_ = false;
+                mode_change_ = false;                
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask2_->setReference(sampleMobile_);
+            }
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);
+
+            trajEE_Cubic_->setCurrentTime(time_);
+            sampleEE_ = trajEE_Cubic_->computeNext();
+            eeTask_->setReference(sampleEE_);
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));            
+        }
+
+        if (ctrl_mode_ == 35){ //u //move ee +0.1y
+            if (mode_change_){
+                //remove         
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");       
                 tsid_->removeTask("task-se3");
                 tsid_->removeTask("task-posture");
                 tsid_->removeTask("task-torque-bounds");
@@ -1198,16 +1443,37 @@ namespace RobotController{
                 else           trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
 
                 //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
 
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                                                
                 trajEE_Cubic_->setInitSample(H_ee_ref_);
-                H_ee_ref_.translation()(0) -= 0.1;                
+                H_ee_ref_.translation()(1) += 0.1;                
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
+
+                //mobility                
+                if (ismobile_) {                    
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);                    
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));        
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(2.0);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_);                    
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);   
+                }
 
                 reset_control_ = false;
                 mode_change_ = false;                
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask2_->setReference(sampleMobile_);
             }
 
             trajPosture_Cubic_->setCurrentTime(time_);
@@ -1222,9 +1488,386 @@ namespace RobotController{
             state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));            
         }
 
+        if (ctrl_mode_ == 36){ //o //move ee -0.1y
+            if (mode_change_){
+                //remove         
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");       
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-16, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                tsid_->addMotionTask(*eeTask_, 1.0, 0);
+
+                //posture (try to maintain current joint configuration)
+                if (ismobile_) trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                else           trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
+
+                trajPosture_Cubic_->setDuration(2.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                
+                if (ismobile_) trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_-2));
+                else           trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
+
+                //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
+                trajEE_Cubic_->setStartTime(time_);
+                trajEE_Cubic_->setDuration(2.0);
+
+                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                                                
+                trajEE_Cubic_->setInitSample(H_ee_ref_);
+                H_ee_ref_.translation()(1) -= 0.1;                
+                trajEE_Cubic_->setGoalSample(H_ee_ref_);
+
+                //mobility                
+                if (ismobile_) {                    
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);                    
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));        
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(2.0);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_);                    
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);   
+                }
+
+                reset_control_ = false;
+                mode_change_ = false;                
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask2_->setReference(sampleMobile_);
+            }
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);
+
+            trajEE_Cubic_->setCurrentTime(time_);
+            sampleEE_ = trajEE_Cubic_->computeNext();
+            eeTask_->setReference(sampleEE_);
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));            
+        }
+
+        if (ctrl_mode_ == 41){ //a //move mobile +0.1x with keeping posture
+            if (mode_change_){
+                //remove
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+
+                //posture
+                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                trajPosture_Cubic_->setDuration(1.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                trajPosture_Cubic_->setGoalSample(q_ref_);               
+
+                //mobility                
+                if (ismobile_) {                    
+                    tsid_->addMotionTask(*mobileTask_, 1.0, 1);
+                    mobileTask_->setDesiredinertia(MatrixXd::Identity(6,6));     
+
+                    tsid_->addMotionTask(*mobileTask2_, 0.1, 1);
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));                         
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(5.0);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_);
+                    
+                    H_mobile_ref_.translation()(0) += 1.5;
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);     
+                }
+
+                reset_control_ = false;
+                mode_change_ = false;
+                est_time_ = time_;
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask_->setReference(sampleMobile_);
+                mobileTask2_->setReference(sampleMobile_);
+            }          
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);        
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
+
+            if (time_ > est_time_ + 5.0 + 3.0) state_.torque_.head(2).setZero();
+        }
+
+        if (ctrl_mode_ == 42){ //s //move mobile -0.1x with keeping posture
+            if (mode_change_){
+                //remove
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+
+                //posture
+                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                trajPosture_Cubic_->setDuration(1.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                trajPosture_Cubic_->setGoalSample(q_ref_);               
+
+                //mobility                
+                if (ismobile_) {                    
+                    tsid_->addMotionTask(*mobileTask_, 1.0, 1);                                        
+                    mobileTask_->setDesiredinertia(MatrixXd::Identity(6,6));     
+
+                    tsid_->addMotionTask(*mobileTask2_, 0.1, 1);
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));                         
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(5.0);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_);
+                    
+                    H_mobile_ref_.translation()(0) -= 1.5;
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);     
+                }
+
+                reset_control_ = false;
+                mode_change_ = false;
+                est_time_ = time_;
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask_->setReference(sampleMobile_);
+                mobileTask2_->setReference(sampleMobile_);
+            }          
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);        
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
+
+            if (time_ > est_time_ + 5.0 + 3.0) state_.torque_.head(2).setZero();
+        }  
+
+        if (ctrl_mode_ == 43){ //d //move mobile +0.1x with keeping ee
+            if (mode_change_){
+                //remove
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                tsid_->addMotionTask(*eeTask_, 1.0, 0);
+
+                //posture
+                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                trajPosture_Cubic_->setDuration(2.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                trajPosture_Cubic_->setGoalSample(q_ref_);
+
+                //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
+                trajEE_Cubic_->setStartTime(time_);
+                trajEE_Cubic_->setDuration(2.0);
+                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
+                trajEE_Cubic_->setInitSample(H_ee_ref_);
+                trajEE_Cubic_->setGoalSample(H_ee_ref_);
+
+                //mobility                
+                if (ismobile_) {
+                    tsid_->addMotionTask(*mobileTask_, 1.0, 0);
+                    mobileTask_->setDesiredinertia(MatrixXd::Identity(6,6));     
+
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));     
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(2.0);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_);
+                    
+                    H_mobile_ref_.translation()(0) += 0.1;
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);     
+                }
+
+                reset_control_ = false;
+                mode_change_ = false;
+                est_time_ = time_;
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask_->setReference(sampleMobile_);
+                mobileTask2_->setReference(sampleMobile_);
+            }          
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);
+
+            trajEE_Cubic_->setCurrentTime(time_);
+            sampleEE_ = trajEE_Cubic_->computeNext();
+            eeTask_->setReference(sampleEE_);
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
+
+            if (time_ > est_time_ + 2.0 + 3.0) state_.torque_.head(2).setZero();
+        }  
+
+        if (ctrl_mode_ == 44){ //f //move mobile -0.1x with keeping ee
+            if (mode_change_){
+                //remove
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                tsid_->addMotionTask(*eeTask_, 1.0, 0);
+
+                //posture
+                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                trajPosture_Cubic_->setDuration(2.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                trajPosture_Cubic_->setGoalSample(q_ref_);
+
+                //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
+                trajEE_Cubic_->setStartTime(time_);
+                trajEE_Cubic_->setDuration(2.0);
+                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
+                trajEE_Cubic_->setInitSample(H_ee_ref_);
+                trajEE_Cubic_->setGoalSample(H_ee_ref_);
+
+                //mobility                
+                if (ismobile_) {                    
+                    tsid_->addMotionTask(*mobileTask_, 1.0, 0);
+                    mobileTask_->setDesiredinertia(MatrixXd::Identity(6,6));     
+
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));                         
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(2.0);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_);
+                    
+                    H_mobile_ref_.translation()(0) -= 0.1;
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);     
+                }
+
+                reset_control_ = false;
+                mode_change_ = false;
+                est_time_ = time_;
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask_->setReference(sampleMobile_);
+                mobileTask2_->setReference(sampleMobile_);
+            }          
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);
+
+            trajEE_Cubic_->setCurrentTime(time_);
+            sampleEE_ = trajEE_Cubic_->computeNext();
+            eeTask_->setReference(sampleEE_);
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
+
+            if (time_ > est_time_ + 2.0 + 3.0) state_.torque_.head(2).setZero();
+        }  
+
+        if (ctrl_mode_ == 45){ //t //base backward
+            if (mode_change_){
+                //remove
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+
+                //posture
+                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_-2));
+                trajPosture_Cubic_->setDuration(1.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                trajPosture_Cubic_->setGoalSample(q_ref_);                           
+
+                reset_control_ = false;
+                mode_change_ = false;
+                est_time_ = time_;
+            }
+            // husky
+            if (est_time_ + 5.0 > time_) {                
+                state_.torque_(0) = -50.;
+                state_.torque_(1) = -50.;                
+            }          
+            else{
+                state_.torque_(0) = 0.0;
+                state_.torque_(1) = 0.0;                
+            }
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);        
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);            
+            state_.torque_.tail(na_ -2) = tsid_->getAccelerations(solver_->solve(HQPData)).tail(na_-2);             
+        }
+
         if (ctrl_mode_ == 99){ //p //print current ee state
             if (mode_change_){
-                //remove               
+                //remove     
+                tsid_->removeTask("task-mobile");
+                tsid_->removeTask("task-mobile2");          
                 tsid_->removeTask("task-se3");
                 tsid_->removeTask("task-posture");
                 tsid_->removeTask("task-torque-bounds");
@@ -1244,16 +1887,39 @@ namespace RobotController{
                 if (ismobile_) trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_-2));
                 else           trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
 
+                //ee
+                eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
+                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
                 trajEE_Cubic_->setInitSample(H_ee_ref_);
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
 
+                cout << "current EE" << endl;
                 cout << H_ee_ref_ << endl;
 
+                //mobility                
+                if (ismobile_) {                    
+                    tsid_->addMotionTask(*mobileTask2_, 1.0, 0);
+                    mobileTask2_->setDesiredinertia(MatrixXd::Identity(6,6));     
+
+                    H_mobile_ref_ = robot_->getMobilePosition(data_, 5); //5 means state.q_ at panda joint 1 
+                    trajMobile_Cubic_->setStartTime(time_);
+                    trajMobile_Cubic_->setDuration(2.0);
+                    trajMobile_Cubic_->setInitSample(H_mobile_ref_);                    
+                    trajMobile_Cubic_->setGoalSample(H_mobile_ref_);
+                }
+
                 reset_control_ = false;
-                mode_change_ = false;
+                mode_change_ = false;                              
+            }
+
+            if (ismobile_) {
+                // husky
+                trajMobile_Cubic_->setCurrentTime(time_);
+                sampleMobile_ = trajMobile_Cubic_->computeNext();
+                mobileTask2_->setReference(sampleMobile_);
             }
 
             trajPosture_Cubic_->setCurrentTime(time_);
@@ -1267,7 +1933,9 @@ namespace RobotController{
             const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
             state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
         }
-    }
+
+        // cout << state_.torque_.transpose() << endl;
+    }        
 
     void FrankaHuskyWrapper::franka_output(VectorXd & qacc) { //from here to main code
         if (ismobile_) qacc = state_.torque_.tail(na_-2);
@@ -1292,6 +1960,17 @@ namespace RobotController{
     void FrankaHuskyWrapper::position_offset(pinocchio::SE3 & oMi){
         //API:Vector of absolute joint placements (wrt the world).
         oMi = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;
+    }
+
+    void FrankaHuskyWrapper::position_link0_offset(pinocchio::SE3 & oMi){
+        //API:Vector of absolute joint placements (wrt the world).
+        SE3 panda_link0_ee;
+        panda_link0_ee = robot_->framePosition(data_, robot_->model().getFrameId("panda_link0"));
+
+        SE3 panda_joint7_offset;
+        this->position_offset(panda_joint7_offset);
+        
+        oMi = panda_link0_ee.inverse() * panda_joint7_offset;    
     }
 
     void FrankaHuskyWrapper::velocity(pinocchio::Motion & vel){
@@ -1464,8 +2143,9 @@ namespace RobotController{
     }
     
 
-    void FrankaHuskyWrapper::Fh_gain_matrix(MatrixXd & Fh){
-        Fh = Fh_;        
+    void FrankaHuskyWrapper::Fh_gain_matrix(MatrixXd & Fh, MatrixXd & Fh_local){
+        Fh = Fh_;   
+        Fh_local = Fh_local_;     
     }
 
     void FrankaHuskyWrapper::ee_state(Vector3d & pos, Eigen::Quaterniond & quat){
@@ -1514,8 +2194,8 @@ namespace RobotController{
     }
 
     pinocchio::SE3 FrankaHuskyWrapper::vel_to_SE3(VectorXd vel, double dt){        
-        Quaterniond angvel_quat(1, vel(3) * dt * 0.5, vel(4) * dt * 0.5, vel(5) * dt * 0.5);
-        Matrix3d Rotm = angvel_quat.normalized().toRotationMatrix();        
+        Quaterniond angvel_quat(1, vel(3) * dt * 0.5, vel(4) * dt * 0.5, vel(5) * dt * 0.5);        
+        Matrix3d Rotm = angvel_quat.normalized().toRotationMatrix();                
         
         pinocchio::SE3 T;
         T.translation() = vel.head(3) * dt;

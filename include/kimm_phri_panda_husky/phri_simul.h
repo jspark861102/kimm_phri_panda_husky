@@ -36,7 +36,7 @@ geometry_msgs::Transform ee_state_msg_;
 sensor_msgs::JointState base_state_msg_;
 
 double mujoco_time_, time_, dt, est_time_;
-bool isgrasp_, ismobile_, issimulation_;
+bool isgrasp_, ismobile_, issimulation_, isrobotiq_, iscalibration_;
 Eigen::VectorXd franka_qacc_, husky_qacc_, robot_nle_, robot_g_, franka_torque_, Fext_cali_;
 Eigen::MatrixXd robot_mass_, robot_J_local_, robot_dJ_local_, robot_J_world_;
 string group_name;

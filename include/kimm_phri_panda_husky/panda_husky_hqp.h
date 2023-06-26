@@ -75,8 +75,8 @@ typedef struct SE3_Action{
 
 namespace RobotController{
     class FrankaHuskyWrapper{
-        public: 
-            FrankaHuskyWrapper(const std::string & robot_node, const bool & issimulation, const bool & ismobile, ros::NodeHandle & node);
+        public:             
+            FrankaHuskyWrapper(const std::string & robot_node, const bool & issimulation, const bool & ismobile, const bool & isrobotiq, const bool & iscalibration, ros::NodeHandle & node);
             ~FrankaHuskyWrapper(){};
 
             void initialize();
@@ -94,6 +94,7 @@ namespace RobotController{
 
             void position(pinocchio::SE3 & oMi);
             void position_offset(pinocchio::SE3 & oMi);
+            void position_link0_offset(pinocchio::SE3 & oMi);
             void com(Eigen::Vector3d& com);
             void velocity(pinocchio::Motion& vel);
             void velocity_origin(pinocchio::Motion& vel);            
@@ -116,7 +117,7 @@ namespace RobotController{
             void g(VectorXd & g_vec);
             void g_joint7(VectorXd & g_vec);
             void g_local_offset(VectorXd & g_vec);
-            void Fh_gain_matrix(MatrixXd & Fh);
+            void Fh_gain_matrix(MatrixXd & Fh, MatrixXd & Fh_local);
             void MxLocal_offset(MatrixXd & Mx);
 
             void ee_state(Vector3d & pos, Eigen::Quaterniond & quat);
@@ -131,6 +132,10 @@ namespace RobotController{
             void get_dt(double dt);
             double trajectory_length_in_time();
             double noise_elimination(double x, double limit);
+            void eeoffset_update(const MatrixXd& R_joint7);
+            void R_joint7();
+            void EstimationMotion();
+
 
             int ctrltype(){
                 return ctrl_mode_;
@@ -155,15 +160,15 @@ namespace RobotController{
             Eigen::VectorXd q_ref_;
             pinocchio::SE3 H_ee_ref_, H_mobile_ref_, T_offset_, T_vel_;
             Vector3d ee_offset_, obj_length_global_, obj_length_local_;
-            MatrixXd Adj_mat_, hGr_local_, hGr_local_Null_, hGr_local_pinv_, R_joint7_atHome_;
+            MatrixXd Adj_mat_, hGr_local_, hGr_local_Null_, hGr_local_pinv_, R_joint7_atHome_, R_joint7_atTask_;
             double est_time_, dt_;
             double joint7_to_finger_;
             Vector6d Fext_, Fext_calibration_, Dinv_gain_;
             bool initial_calibration_update_, getcalibration_;     
-            MatrixXd Me_inv_, P_global_, P_local_, Fh_;       
+            MatrixXd Me_inv_, P_global_, P_local_, Fh_, Fh_local_;       
             ofstream fout_;  
-            double traj_length_in_time_;   
-            bool ismobile_;           
+            double traj_length_in_time_, target_distance_, target_time_, target_velocity_;   
+            bool ismobile_, isrobotiq_;           
 
             //hqp
             std::shared_ptr<kimmhqp::robot::RobotWrapper> robot_;

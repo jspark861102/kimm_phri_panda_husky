@@ -1,0 +1,29 @@
+<?xml version="1.0" ?>
+<launch>  
+  <arg name="robot_ip" default="192.168.10.52" />
+  <arg name="load_gripper" default="false" />    
+  <arg name="robotiq_gripper" default="true" />    
+  <arg name="mobile" default="true"/> 
+  <arg name="calibration" default="false"/> 
+  <arg name="note_book" default="false"/> <!-- true: rqt_gui with notebook size, false: rqt_gui with PC size -->
+
+  <param name="robot_group" type="string" value="ns1"/>  
+  <param name="load_gripper" type="bool" value="$(arg load_gripper)"/>
+  <param name="robotiq_gripper" type="bool" value="$(arg robotiq_gripper)"/>
+  <param name="mobile" type="bool" value="$(arg mobile)"/>
+  <param name="issimulation" type="bool" value="false"/>  
+  <param name="iscalibration" type="bool" value="$(arg calibration)"/>
+
+  <group ns ="ns1">
+    <group if="$(arg mobile)">      
+      <!-- rqt -->
+      <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="--perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri_panda_husky_real_30inch.perspective" output="screen"/>            
+    </group>
+
+    <group unless="$(arg mobile)">     
+      <!-- rqt -->
+      <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="--perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri_panda_real_30inch.perspective" output="screen"/>
+    </group>
+  </group>
+</launch>
+

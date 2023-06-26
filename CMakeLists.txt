@@ -18,6 +18,8 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   roslib
   tf
+  robotiq_2f_gripper_control
+  robotiq_2f_gripper_msgs
 )
 
 find_package(Eigen3 REQUIRED)
@@ -40,6 +42,8 @@ catkin_package(
     pluginlib
     realtime_tools    
     roscpp
+    robotiq_2f_gripper_control
+    robotiq_2f_gripper_msgs
   DEPENDS Franka
 )
 ###########

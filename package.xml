@@ -20,6 +20,8 @@
   <depend>pluginlib</depend>
   <depend>realtime_tools</depend>
   <depend>roscpp</depend>
+  <depend>robotiq_2f_gripper_control</depend>
+  <depend>robotiq_2f_gripper_msgs</depend>
   
   <exec_depend>franka_control</exec_depend>
   <exec_depend>franka_description</exec_depend>
@@ -31,7 +33,7 @@
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>
-    <controller_interface plugin="${prefix}/kimm_phri_panda_plugin.xml"/>
+    <controller_interface plugin="${prefix}/kimm_phri_panda_husky_plugin.xml"/>
     <!-- Other tools can request additional information be placed here -->
 
   </export>

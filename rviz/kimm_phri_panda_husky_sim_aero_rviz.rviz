@@ -6,8 +6,10 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
+        - /RobotModel1
+        - /TF1
         - /TF1/Frames1
-      Splitter Ratio: 0.5441176295280457
+      Splitter Ratio: 0.7058823704719543
     Tree Height: 654
   - Class: rviz/Selection
     Name: Selection
@@ -62,69 +64,135 @@ Visualization Manager:
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
-        panda_hand:
+        ns1_rviz_base_footprint:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        ns1_rviz_base_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        panda_leftfinger:
+        ns1_rviz_front_bumper_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        panda_link0:
+        ns1_rviz_husky_front_left_wheel_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        panda_link1:
+        ns1_rviz_husky_front_right_wheel_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        panda_link2:
+        ns1_rviz_husky_rear_left_wheel_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        panda_link3:
+        ns1_rviz_husky_rear_right_wheel_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        panda_link4:
+        ns1_rviz_imu_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        ns1_rviz_inertial_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        ns1_rviz_panda_hand:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        panda_link5:
+        ns1_rviz_panda_leftfinger:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        panda_link6:
+        ns1_rviz_panda_link0:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        panda_link7:
+        ns1_rviz_panda_link1:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        panda_link8:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        panda_rightfinger:
+        ns1_rviz_panda_link2:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        world:
+        ns1_rviz_panda_link3:
           Alpha: 1
           Show Axes: false
           Show Trail: false
+          Value: true
+        ns1_rviz_panda_link4:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        ns1_rviz_panda_link5:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        ns1_rviz_panda_link6:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        ns1_rviz_panda_link7:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        ns1_rviz_panda_link8:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        ns1_rviz_panda_rightfinger:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        ns1_rviz_rear_bumper_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        ns1_rviz_top_chassis_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        ns1_rviz_top_plate_front_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        ns1_rviz_top_plate_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        ns1_rviz_top_plate_rear_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        ns1_rviz_user_rail_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
       Name: RobotModel
       Robot Description: robot_description
       TF Prefix: ""
@@ -138,31 +206,61 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
-        panda_hand:
-          Value: false
-        panda_leftfinger:
-          Value: false
-        panda_link0:
+        husky_odom:
           Value: true
-        panda_link1:
+        ns1_rviz_base_footprint:
           Value: false
-        panda_link2:
-          Value: false
-        panda_link3:
-          Value: false
-        panda_link4:
-          Value: false
-        panda_link5:
-          Value: false
-        panda_link6:
-          Value: false
-        panda_link7:
-          Value: false
-        panda_link8:
-          Value: false
-        panda_rightfinger:
+        ns1_rviz_base_link:
           Value: true
-        world:
+        ns1_rviz_front_bumper_link:
+          Value: false
+        ns1_rviz_husky_front_left_wheel_link:
+          Value: false
+        ns1_rviz_husky_front_right_wheel_link:
+          Value: false
+        ns1_rviz_husky_rear_left_wheel_link:
+          Value: false
+        ns1_rviz_husky_rear_right_wheel_link:
+          Value: false
+        ns1_rviz_imu_link:
+          Value: false
+        ns1_rviz_inertial_link:
+          Value: false
+        ns1_rviz_panda_hand:
+          Value: true
+        ns1_rviz_panda_leftfinger:
+          Value: false
+        ns1_rviz_panda_link0:
+          Value: true
+        ns1_rviz_panda_link1:
+          Value: false
+        ns1_rviz_panda_link2:
+          Value: false
+        ns1_rviz_panda_link3:
+          Value: false
+        ns1_rviz_panda_link4:
+          Value: false
+        ns1_rviz_panda_link5:
+          Value: false
+        ns1_rviz_panda_link6:
+          Value: false
+        ns1_rviz_panda_link7:
+          Value: true
+        ns1_rviz_panda_link8:
+          Value: false
+        ns1_rviz_panda_rightfinger:
+          Value: false
+        ns1_rviz_rear_bumper_link:
+          Value: false
+        ns1_rviz_top_chassis_link:
+          Value: false
+        ns1_rviz_top_plate_front_link:
+          Value: false
+        ns1_rviz_top_plate_link:
+          Value: false
+        ns1_rviz_top_plate_rear_link:
+          Value: false
+        ns1_rviz_user_rail_link:
           Value: false
       Marker Alpha: 1
       Marker Scale: 1
@@ -171,28 +269,56 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        world:
-          panda_link0:
-            panda_link1:
-              panda_link2:
-                panda_link3:
-                  panda_link4:
-                    panda_link5:
-                      panda_link6:
-                        panda_link7:
-                          panda_link8:
-                            panda_hand:
-                              panda_leftfinger:
-                                {}
-                              panda_rightfinger:
-                                {}
+        husky_odom:
+          ns1_rviz_base_link:
+            ns1_rviz_base_footprint:
+              {}
+            ns1_rviz_front_bumper_link:
+              {}
+            ns1_rviz_husky_front_left_wheel_link:
+              {}
+            ns1_rviz_husky_front_right_wheel_link:
+              {}
+            ns1_rviz_husky_rear_left_wheel_link:
+              {}
+            ns1_rviz_husky_rear_right_wheel_link:
+              {}
+            ns1_rviz_imu_link:
+              {}
+            ns1_rviz_inertial_link:
+              {}
+            ns1_rviz_panda_link0:
+              ns1_rviz_panda_link1:
+                ns1_rviz_panda_link2:
+                  ns1_rviz_panda_link3:
+                    ns1_rviz_panda_link4:
+                      ns1_rviz_panda_link5:
+                        ns1_rviz_panda_link6:
+                          ns1_rviz_panda_link7:
+                            ns1_rviz_panda_link8:
+                              ns1_rviz_panda_hand:
+                                ns1_rviz_panda_leftfinger:
+                                  {}
+                                ns1_rviz_panda_rightfinger:
+                                  {}
+            ns1_rviz_rear_bumper_link:
+              {}
+            ns1_rviz_top_chassis_link:
+              {}
+            ns1_rviz_top_plate_link:
+              ns1_rviz_top_plate_front_link:
+                {}
+              ns1_rviz_top_plate_rear_link:
+                {}
+            ns1_rviz_user_rail_link:
+              {}
       Update Interval: 0
       Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
     Default Light: true
-    Fixed Frame: world
+    Fixed Frame: husky_odom
     Frame Rate: 30
   Name: root
   Tools:
@@ -224,17 +350,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 0.12398366630077362
-        Y: 0.057787682861089706
-        Z: 0.2569502294063568
+        X: -0.1395280808210373
+        Y: 0.1613813042640686
+        Z: 0.4208705723285675
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.5953986048698425
+      Pitch: 0.20539867877960205
       Target Frame: <Fixed Frame>
-      Yaw: 4.863583087921143
+      Yaw: 4.933582782745361
     Saved: ~
 Window Geometry:
   Displays:

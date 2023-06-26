@@ -12,6 +12,7 @@ git clone https://github.com/jspark861102/kimm_trajectory_smoother.git -b melodi
 ### 1.2 Robot model and simulator
 ```bash
 git clone https://github.com/jspark861102/franka_ros.git #my used version (0.8.1)
+git clone https://github.com/jspark861102/husky.git -b melodic-devel #my used version (0.4.10)
 git clone https://github.com/jspark861102/kimm_robots_description.git -b melodic
 git clone https://github.com/jspark861102/kimm_mujoco_ros.git -b melodic
 ```
@@ -31,11 +32,11 @@ git clone https://github.com/jspark861102/kimm_phri_panda_husky.git
 ### 2.1 Simulation
 ```bash
 # Simulation 
-roslaunch kimm_phri_panda_husky ns0_phri_simulation.launch
+roslaunch kimm_phri_panda_husky ns1_phri_simulation.launch
 ```
 
 ### 2.1 Real Robot
 ```bash
 # object aware impedance controller for human-robot collaborative transportation
-roslaunch kimm_phri_panda_husky ns0_phri_real.launch
+roslaunch kimm_phri_panda_husky ns1_phri_real.launch
 ```

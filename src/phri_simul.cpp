@@ -17,15 +17,20 @@ int main(int argc, char **argv)
 
     /////////////// Robot Wrapper ///////////////
     n_node.getParam("/robot_group", group_name);    
+    n_node.getParam("/robotiq_gripper", isrobotiq_);    
     n_node.getParam("/mobile", ismobile_);      
-    n_node.getParam("/issimulation", issimulation_);   
+    n_node.getParam("/issimulation", issimulation_);  
+    n_node.getParam("/iscalibration", iscalibration_);        
+    cout << "robotiq_gripper   " << isrobotiq_ << endl;
     cout << "ismobile   " << ismobile_ << endl;
-    cout << "issimulation   " << issimulation_ << endl;
-    ctrl_ = new RobotController::FrankaHuskyWrapper(group_name, issimulation_, ismobile_, n_node);
-    ctrl_->initialize();
+    cout << "issimulation   " << issimulation_ << endl;    
+    cout << "iscalibration   " << iscalibration_ << endl;
+   
+    ctrl_ = new RobotController::FrankaHuskyWrapper(group_name, issimulation_, ismobile_, isrobotiq_, iscalibration_, n_node); 
+    ctrl_->initialize();    
     ctrl_->get_dt(dt);
     traj_length_in_time_ = ctrl_->trajectory_length_in_time();
-    
+
     /////////////// mujoco sub : from mujoco to here ///////////////    
     ros::Subscriber jointState = n_node.subscribe("mujoco_ros/mujoco_ros_interface/joint_states", 5, &JointStateCallback, ros::TransportHints().tcpNoDelay(true));    
     ros::Subscriber mujoco_command_sub = n_node.subscribe("mujoco_ros/mujoco_ros_interface/sim_command_sim2con", 5, &simCommandCallback, ros::TransportHints().tcpNoDelay(true));
@@ -71,7 +76,7 @@ int main(int argc, char **argv)
     isobjectdynamics_ = false;
     isFextcalibration_ = false;
     est_time_ = 0.0;
-    // ********************************************** //    
+    // ********************************************** //        
 
     while (ros::ok()){        
         //mujoco sim run 
@@ -125,7 +130,8 @@ int main(int argc, char **argv)
             }                                    
         }
 
-        if (ismobile_) ctrl_->husky_output(husky_qacc_);   //get control input
+        // get husky control input
+        if (ismobile_) ctrl_->husky_output(husky_qacc_);   
 
         // get Mob
         // if (ctrl_->ctrltype() != 0)
@@ -136,7 +142,7 @@ int main(int argc, char **argv)
         // set control input to mujoco
         setGripperCommand();                              //set gripper torque by trigger value
         setRobotCommand();                                //set franka and husky command 
-        robot_command_pub_.publish(robot_command_msg_);   //pub total command
+        robot_command_pub_.publish(robot_command_msg_);   //pub total command to mujoco
        
         // get state
         getEEState();                                     //obtained from "robot_->position", and publish for monitoring              
@@ -176,13 +182,6 @@ void vel_accel_pub(){
     vel_param.angular()[0] = v_mujoco[3];
     vel_param.angular()[1] = v_mujoco[4];
     vel_param.angular()[2] = v_mujoco[5];
-
-    // acc_param.linear()[0] = a_mujoco[0];
-    // acc_param.linear()[1] = a_mujoco[1];
-    // acc_param.linear()[2] = a_mujoco[2];
-    // acc_param.angular()[0] = a_mujoco[3];
-    // acc_param.angular()[1] = a_mujoco[4];
-    // acc_param.angular()[2] = a_mujoco[5];
 
     acc_param.linear()[0] = a_mujoco_filtered[0];
     acc_param.linear()[1] = a_mujoco_filtered[1];
@@ -225,7 +224,6 @@ void FT_measured_pub() {
             ekf->init(time_, param);
         }
     }
-
 
     //actually, franka_torque_ is not a measured but command torque, because measurment is not available
     tau_estimated = robot_mass_ * ddq_mujoco + robot_nle_;        
@@ -408,8 +406,9 @@ void JointStateCallback(const sensor_msgs::JointState::ConstPtr& msg){
     sensor_msgs::JointState msg_tmp;
     msg_tmp = *msg;    
 
-    ctrl_->franka_update(msg_tmp);        
     joint_states_publish(msg_tmp);        
+    
+    ctrl_->franka_update(msg_tmp);            
 
     if (ismobile_) {
         ctrl_->husky_update(msg_tmp);
@@ -457,8 +456,8 @@ void joint_states_publish(const sensor_msgs::JointState& msg){
     joint_states.header.stamp = ros::Time::now();    
 
     if (ismobile_){
-        //revolute joint name in rviz urdf (husky_panda_rviz_ns0.urdf)
-        joint_states.name = {"ns0_husky_front_left_wheel", "ns0_husky_front_right_wheel", "ns0_husky_rear_left_wheel", "ns0_husky_rear_right_wheel", "ns0_panda_joint1","ns0_panda_joint2","ns0_panda_joint3","ns0_panda_joint4","ns0_panda_joint5","ns0_panda_joint6","ns0_panda_joint7","ns0_panda_finger_joint1","ns0_panda_finger_joint2"};    
+        //revolute joint name in rviz urdf (husky_panda_rviz_ns1.urdf)
+        joint_states.name = {"ns1_husky_front_left_wheel", "ns1_husky_front_right_wheel", "ns1_husky_rear_left_wheel", "ns1_husky_rear_right_wheel", "ns1_panda_joint1","ns1_panda_joint2","ns1_panda_joint3","ns1_panda_joint4","ns1_panda_joint5","ns1_panda_joint6","ns1_panda_joint7","ns1_panda_finger_joint1","ns1_panda_finger_joint2"};    
 
         joint_states.position.resize(13); //husky(4) + panda(7) + finger(2), rviz urdf doesn't have odom joint
         joint_states.velocity.resize(13); //husky(4) + panda(7) + finger(2), rviz urdf doesn't have odom joint
@@ -466,13 +465,11 @@ void joint_states_publish(const sensor_msgs::JointState& msg){
         for (int i=0; i<13; i++){ 
             joint_states.position[i] = msg.position[7+i];
             joint_states.velocity[i] = msg.velocity[6+i];
-        }
-        // joint_states.position[11] = 0.0;
-        // joint_states.position[12] = 0.0;
+        }        
     }
     else {
         //revolute joint name in rviz urdf (panda_arm_hand_l_rviz.urdf)
-        joint_states.name = {"panda_joint1","panda_joint2","panda_joint3","panda_joint4","panda_joint5","panda_joint6","panda_joint7","panda_finger_joint1","panda_finger_joint2"};    
+        joint_states.name = {"panda_joint1","panda_joint2","panda_joint3","panda_joint4","panda_joint5","panda_joint6","panda_joint7","panda_finger_joint1","panda_finger_joint2"};            
 
         joint_states.position.resize(9); //panda(7) + finger(2)
         joint_states.velocity.resize(9); //panda(7) + finger(2)
@@ -588,49 +585,28 @@ void keyboard_event(){
                 cout << " " << endl;
                 cout << "home position" << endl;
                 cout << " " << endl;
-                break;
-            case 'a': //home and axis align btw base and joint 7
-                msg = 2;
-                ctrl_->ctrl_update(msg);
-                cout << " " << endl;
-                cout << "home and axis align btw base and joint 7" << endl;
-                cout << " " << endl;
-                break;                
-            case 'y': //move mobile -0.1x with keeping ee
-                msg = 4;
-                ctrl_->ctrl_update(msg);
-                cout << " " << endl;
-                cout << "move mobile -0.1x with keeping ee" << endl;
-                cout << " " << endl;
-                break;                
-            case 'w': //rotate ee in -y axis
+                break;                                         
+            case 'w': //null motion ee
                 msg = 11;
-                ctrl_->ctrl_update(msg);
-                cout << " " << endl;
-                cout << "rotate ee in -y aixs" << endl;
-                cout << " " << endl;
-                break;  
-            case 'r': //rotate ee in -x axis
-                msg = 12;
-                ctrl_->ctrl_update(msg);
-                cout << " " << endl;
-                cout << "rotate ee in -x axis" << endl;
-                cout << " " << endl;
-                break;
-            case 't': //sine motion ee in -x axis
-                msg = 13;
-                ctrl_->ctrl_update(msg);
-                cout << " " << endl;
-                cout << "sine motion ee in -x axis" << endl;
-                cout << " " << endl;
-                break;               
-            case 'e': //null motion ee
-                msg = 14;
                 ctrl_->ctrl_update(msg);
                 cout << " " << endl;
                 cout << "null motion ee in -x axis" << endl;
                 cout << " " << endl;
-                break;    
+                break;   
+            case 'e': //null motion ee with mobile
+                msg = 12;
+                ctrl_->ctrl_update(msg);
+                cout << " " << endl;
+                cout << "null motion ee in -x axis" << endl;
+                cout << " " << endl;
+                break; 
+            case 'r': //test move ee -0.2x & -0.2z
+                msg = 13;
+                ctrl_->ctrl_update(msg);
+                cout << " " << endl;
+                cout << "move ee -0.2x & -0.2z" << endl;
+                cout << " " << endl;
+                break;             
             case 'c': //admittance control
                 msg = 21;
                 ctrl_->ctrl_update(msg);
@@ -681,6 +657,48 @@ void keyboard_event(){
                 cout << "move ee -0.1 x" << endl;
                 cout << " " << endl;
                 break;   
+            case 'u': //move ee +0.1y
+                msg = 35;
+                ctrl_->ctrl_update(msg);
+                cout << " " << endl;
+                cout << "move ee +0.1 y" << endl;
+                cout << " " << endl;
+                break;                                   
+            case 'o': //move ee -0.1y
+                msg = 36;
+                ctrl_->ctrl_update(msg);
+                cout << " " << endl;
+                cout << "move ee -0.1 y" << endl;
+                cout << " " << endl;
+                break;    
+            case 'a': //move mobile +0.1x with keeping posture
+                msg = 41;
+                ctrl_->ctrl_update(msg);
+                cout << " " << endl;
+                cout << "move mobile +0.1x with keeping posture" << endl;
+                cout << " " << endl;
+                break; 
+            case 's': //move mobile -0.1x with keeping posture
+                msg = 42;
+                ctrl_->ctrl_update(msg);
+                cout << " " << endl;
+                cout << "move mobile -0.1x with keeping posture" << endl;
+                cout << " " << endl;
+                break;
+            case 'd': //move mobile +0.1x with keeping ee
+                msg = 43;
+                ctrl_->ctrl_update(msg);
+                cout << " " << endl;
+                cout << "move mobile +0.1x with keeping ee" << endl;
+                cout << " " << endl;
+                break; 
+            case 'f': //move mobile -0.1x with keeping ee
+                msg = 44;
+                ctrl_->ctrl_update(msg);
+                cout << " " << endl;
+                cout << "move mobile -0.1x with keeping ee" << endl;
+                cout << " " << endl;
+                break;      
             case 'q': //object estimation
                 if (isstartestimation_){
                     // cout << "end estimation" << endl;
@@ -694,7 +712,7 @@ void keyboard_event(){
 
                     est_time_ = time_;
 
-                    msg = 14;
+                    msg = 11;
                     ctrl_->ctrl_update(msg);
                     cout << " " << endl;
                     cout << "null motion ee in -x axis for estimation" << endl;

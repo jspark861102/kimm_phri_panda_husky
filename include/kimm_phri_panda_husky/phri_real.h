@@ -17,6 +17,7 @@
 #include "std_msgs/Float32MultiArray.h"
 #include "std_msgs/Float32.h"
 #include "sensor_msgs/JointState.h"
+#include "sensor_msgs/Joy.h"
 #include "geometry_msgs/Transform.h"
 #include "geometry_msgs/Twist.h"
 #include "nav_msgs/Odometry.h"
@@ -50,6 +51,10 @@
 #include <../../kimm_object_estimation/include/kimm_object_estimation/objdyn/object_dynamics.hpp>
 #include <kimm_phri_panda_husky/ekf_paramConfig.h>
 
+//robotiq gripper
+#include <robotiq_2f_gripper_msgs/CommandRobotiqGripperAction.h>
+#include <robotiq_2f_gripper_control/robotiq_gripper_client.h>
+
 // System
 #include <iostream>
 #include <fstream>
@@ -77,15 +82,20 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
 
   void odomCallback(const nav_msgs::OdometryConstPtr &msg);
   void huskystateCallback(const sensor_msgs::JointStateConstPtr &msg);
+  void frankagripperstateCallback(const sensor_msgs::JointStateConstPtr &msg);
+  void robotiqstateCallback(const sensor_msgs::JointStateConstPtr &msg);
   void ctrltypeCallback(const std_msgs::Int16ConstPtr &msg);
   void mobtypeCallback(const std_msgs::Int16ConstPtr &msg);  
+  void teleopjoyCallback(const sensor_msgs::JoyConstPtr &joy_msg);
 
   void asyncCalculationProc(); 
   void modeChangeReaderProc();
   void setFrankaCommand();
   void setHuskyCommand();
-  void getEEState();
-  void getBaseState();
+  void pubEEState();
+  void pubBaseState();
+  void pubFextGlobal();
+  void pubJointStates();
 
   //////////////////// object estimation /////////////////
   void getObjParam_init();
@@ -95,7 +105,8 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
   void FT_measured_pub();
   void vel_accel_pub();  
   VectorXd FT_local_to_global(VectorXd & f_local);
-  VectorXd FT_global_to_local(VectorXd & f_global);
+  Vector6d FT_global_to_local(Vector6d & f_global);
+  void test_publication();
   ////////////////////////////////////////////////////////
 
   void keyboard_event();
@@ -115,17 +126,21 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
 
       return byteswaiting > 0;
   }
-  double lowpassFilter(double sample_time, double y, double y_last, double cutoff_frequency){ //cutoff_frequency is in [Hz]
+  double lowpassFilter(double sample_time, double x, double y_last, double cutoff_frequency){ //cutoff_frequency is in [Hz]
       double gain = sample_time / (sample_time + (1.0 / (2.0 * M_PI * cutoff_frequency)));
-      return gain * y + (1 - gain) * y_last;
+      return gain * x + (1 - gain) * y_last;
   }
-  Vector7d lowpassFilter(double sample_time, const Vector7d y, const Vector7d y_last, double cutoff_frequency){ //cutoff_frequency is in [Hz]
+  Vector7d lowpassFilter(double sample_time, const Vector7d x, const Vector7d y_last, double cutoff_frequency){ //cutoff_frequency is in [Hz]
       double gain = sample_time / (sample_time + (1.0 / (2.0 * M_PI * cutoff_frequency)));
-      return gain * y + (1 - gain) * y_last;
+      return gain * x + (1 - gain) * y_last;
   }
-  Vector6d lowpassFilter(double sample_time, const Vector6d y, const Vector6d y_last, double cutoff_frequency){ //cutoff_frequency is in [Hz]
+  Vector6d lowpassFilter(double sample_time, const Vector6d x, const Vector6d y_last, double cutoff_frequency){ //cutoff_frequency is in [Hz]
       double gain = sample_time / (sample_time + (1.0 / (2.0 * M_PI * cutoff_frequency)));
-      return gain * y + (1 - gain) * y_last;
+      return gain * x + (1 - gain) * y_last;
+  }
+  Vector6d highpassFilter(double sample_time, const Vector6d x, const Vector6d x_last, const Vector6d y_last, double cutoff_frequency){ //cutoff_frequency is in [Hz]
+      double gain = sample_time / (sample_time + (1.0 / (2.0 * M_PI * cutoff_frequency)));
+      return gain * y_last + gain * (x - x_last);
   }
   void InitMob(){
       mob_.torque_d_prev_.setZero(7);
@@ -158,17 +173,19 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
   }
 
  private: 
-    ros::Subscriber odom_subs_, husky_state_subs_;
+    ros::Subscriber odom_subs_, husky_state_subs_, franka_gripper_state_subs_, robotiq_state_subs_, teleop_joy_subs_;
     realtime_tools::RealtimePublisher<geometry_msgs::Twist> husky_ctrl_pub_;
-    ros::Publisher ee_state_pub_, torque_state_pub_, joint_state_pub_, time_pub_;
+    ros::Publisher ee_state_pub_, torque_state_pub_, joint_state_pub_;
     ros::Publisher base_state_pub_, husky_odom_pub_;
-    ros::Publisher Fext_local_forObjectEstimation_pub_, object_parameter_pub_, vel_pub_, accel_pub_, Fext_global_pub_;
+    ros::Publisher Fext_local_forObjectEstimation_pub_, object_parameter_pub_, vel_pub_, accel_pub_, Fext_global_pub_, test_pub_;
     ros::ServiceClient setload_client;
     tf::TransformBroadcaster* br_;
     tf::TransformListener listener_;
     
     nav_msgs::Odometry odom_msg_;
     sensor_msgs::JointState husky_state_msg_;
+    sensor_msgs::JointState franka_gripper_state_msg_;
+    sensor_msgs::JointState robotiq_state_msg_;
     sensor_msgs::JointState base_state_msg_;
     geometry_msgs::Transform ee_state_msg_;
     std_msgs::Float32 time_msg_;
@@ -188,6 +205,8 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
 
     actionlib::SimpleActionClient<franka_gripper::MoveAction> gripper_ac_{"franka_gripper/move", true};
     actionlib::SimpleActionClient<franka_gripper::GraspAction> gripper_grasp_ac_{"franka_gripper/grasp", true};
+   
+    robotiq_2f_gripper_control::RobotiqActionClient * gripper_robotiq_;        
     
     franka_hw::TriggerRate print_rate_trigger_{100}; 
     franka_hw::TriggerRate husky_base_control_trigger_{100};
@@ -197,13 +216,15 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
     const double delta_tau_max_{30.0};
     Vector7d dq_filtered_, franka_torque_, franka_q_, franka_dq_, franka_dq_d_;
     VectorXd franka_ddq_;
-    Vector6d f_filtered_, f_;
+    Vector6d f_filtered_, f_, fh_force_, fh_force_local_;
     Vector3d odom_lpf_, odom_dot_lpf_, odom_lpf_prev_, odom_dot_lpf_prev_, carto_lpf_, carto_lpf_prev_;
     Eigen::VectorXd franka_qacc_, robot_nle_, robot_g_, husky_qvel_, husky_qacc_, husky_qvel_prev_;;
     Vector2d husky_cmd_, wheel_vel_;
     MatrixXd robot_mass_, robot_J_, robot_tau_, robot_tau_d_, robot_mass_practical_, robot_mass_pin_;
     double time_, dt_, traj_length_in_time_;
-    bool isgrasp_,ismobile_, issimulation_;
+    bool isgrasp_,ismobile_, issimulation_, load_gripper_, isrobotiq_, iscalibration_;
+    VectorXi isbutton_pushed_;
+    int previous_button_;
 
     Mob mob_;
     State state_;
@@ -220,17 +241,14 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
     bool isstartestimation_, tau_bias_init_flag, F_ext_bias_init_flag, isobjectdynamics_, ismasspractical_;
     double n_param, m_FT;
     Eigen::MatrixXd A, H, Q, R, P;
-    Eigen::VectorXd h, FT_measured, param_estimated_, param_used_, robot_g_local_, FT_object_, param_true_;
+    Eigen::VectorXd h, FT_measured, param_estimated_, param_used_, param_d435_, param_tip_, robot_g_local_, FT_object_, param_true_;
     pinocchio::Motion vel_param, acc_param;  
     pinocchio::SE3 oMi_;
     Vector7d torque_sensor_bias_, franka_ddq_for_param_, franka_dq_prev_;
-    Vector6d franka_v_, franka_a_, franka_a_filtered_, F_ext_bias_, F_ext_bias1_, F_ext_bias2_;
-    MatrixXd robot_J_local_, robot_dJ_local_, Fh_;    
+    Vector6d franka_v_, franka_a_, franka_a_filtered_, F_ext_bias_;
+    MatrixXd robot_J_local_, robot_dJ_local_, Fh_, Fh_local_;    
     ros::NodeHandle n_node_;    
-    int msg_for_ext_bias_;
     Vector6d f_used_;
-    int ext_count_;
-    double param_comX_prev_, param_comY_prev_, param_comZ_prev_;
     ifstream fin_;
     double est_time_;
 
