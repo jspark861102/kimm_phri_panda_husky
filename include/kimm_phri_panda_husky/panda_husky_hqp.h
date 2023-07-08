@@ -132,7 +132,7 @@ namespace RobotController{
             void get_dt(double dt);
             double trajectory_length_in_time();
             double noise_elimination(double x, double limit);
-            void eeoffset_update(const MatrixXd& R_joint7);
+            void eeoffset_update();
             void R_joint7();
             void EstimationMotion();
 

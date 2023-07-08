@@ -1,13 +1,12 @@
 <?xml version="1.0" ?>
 <launch>  
-  <arg name="robot_ip" default="192.168.10.52" />
-  <arg name="load_gripper" default="true" />    
+  <arg name="robot_ip" default="192.168.10.52" />  
   <arg name="mobile" default="false"/> 
-  <arg name="calibration" default="false"/> 
-  <arg name="note_book" default="false"/> <!-- true: rqt_gui with notebook size, false: rqt_gui with PC size -->
-
+  <arg name="calibration" default="false"/>   
+  <arg name="load_gripper" default="true" />    
+  
   <param name="robot_group" type="string" value="ns1"/>  
-  <param name="load_gripper" type="bool" value="$(arg load_gripper)"/>
+  <param name="load_gripper" type="bool" value="true"/>
   <param name="robotiq_gripper" type="bool" value="false"/>
   <param name="mobile" type="bool" value="$(arg mobile)"/>
   <param name="issimulation" type="bool" value="false"/>    

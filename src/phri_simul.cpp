@@ -456,7 +456,7 @@ void joint_states_publish(const sensor_msgs::JointState& msg){
     joint_states.header.stamp = ros::Time::now();    
 
     if (ismobile_){
-        //revolute joint name in rviz urdf (husky_panda_rviz_ns1.urdf)
+        //revolute joint name in rviz urdf (husky_panda_hand_rviz_ns1.urdf)
         joint_states.name = {"ns1_husky_front_left_wheel", "ns1_husky_front_right_wheel", "ns1_husky_rear_left_wheel", "ns1_husky_rear_right_wheel", "ns1_panda_joint1","ns1_panda_joint2","ns1_panda_joint3","ns1_panda_joint4","ns1_panda_joint5","ns1_panda_joint6","ns1_panda_joint7","ns1_panda_finger_joint1","ns1_panda_finger_joint2"};    
 
         joint_states.position.resize(13); //husky(4) + panda(7) + finger(2), rviz urdf doesn't have odom joint

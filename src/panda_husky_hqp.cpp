@@ -27,7 +27,7 @@ namespace RobotController{
         // Robot for pinocchio
         string model_path, urdf_name;
         n_node_.getParam("/" + robot_node_ +"/robot_urdf_path", model_path);
-        n_node_.getParam("/" + robot_node_ +"/robot_urdf", urdf_name);        //"panda_arm_hand_l.urdf" w/o mobile, "husky_panda_hand_free.urdf" w/ mobile
+        n_node_.getParam("/" + robot_node_ +"/robot_urdf", urdf_name);        //"panda_arm_hand_l.urdf" w/o mobile, "husky_panda_hand.urdf" w/ mobile
 
         vector<string> package_dirs;
         package_dirs.push_back(model_path);
@@ -74,9 +74,9 @@ namespace RobotController{
         //This offset is applied to both reference (in this code) and feedback (in task_se3_equality.cpp)        
         if (isrobotiq_) joint7_to_finger_ = 0.247; //0.247 (z-axis) = 0.222(distance from link7 to left_inner_finger) + 0.025(finger center length)         
         else            joint7_to_finger_ = 0.2054; //0.2054 (z-axis) = 0.107(distance from link7 to EE) + 0.0584(hand length) + 0.04(finger length)          
-
-        this->R_joint7();   //make rotation matrix of joint7 from global to local  
-        this->eeoffset_update(R_joint7_atHome_); //pair with home position    
+        this->eeoffset_update(); 
+        
+        this->R_joint7();   //make rotation matrix of joint7 from global to local          
 
         //////////////////// human grasp position (object length) //////////////////////////////////////// 
         //define object length 
@@ -231,36 +231,22 @@ namespace RobotController{
             anglez =   90.0*M_PI/180.0;
             this->rotx(anglex, Rx);
             this->rotz(anglez, Rz);   
-            R_joint7_atHome_ = Rz * Rx;
-
-            anglex =  90.0*M_PI/180.0;            
-            anglez =  90.0*M_PI/180.0;
-            this->rotx(anglex, Rx);            
-            this->rotz(anglez, Rz);   
-            R_joint7_atTask_ = Rz * Rx;
+            R_joint7_atHome_ = Rz * Rx;            
         }
         else { //franka gripper
             anglex = -180.0*M_PI/180.0;
             anglez =   45.0*M_PI/180.0;
             this->rotx(anglex, Rx);
             this->rotz(anglez, Rz);   
-            R_joint7_atHome_ = Rz * Rx;
-
-            anglex =  90.0*M_PI/180.0;
-            angley = -45.0*M_PI/180.0;
-            anglez =  90.0*M_PI/180.0;
-            this->rotx(anglex, Rx);
-            this->roty(angley, Ry);
-            this->rotz(anglez, Rz);   
-            R_joint7_atTask_ = Rz * Ry * Rx;
+            R_joint7_atHome_ = Rz * Rx;            
         }       
         cout << " " << endl;
         cout << "R_joint7_atHome_" << endl;
         cout << R_joint7_atHome_ << endl;            
     }
 
-    void FrankaHuskyWrapper::eeoffset_update(const MatrixXd& R_joint7){ 
-        ee_offset_ = R_joint7 * Vector3d(0.0, 0.0, -joint7_to_finger_); //global to local        
+    void FrankaHuskyWrapper::eeoffset_update(){ 
+        ee_offset_ = Vector3d(0.0, 0.0, joint7_to_finger_); //w.r.t joint7
 
         T_offset_.setIdentity();
         T_offset_.translation(ee_offset_);                
@@ -367,11 +353,7 @@ namespace RobotController{
 
                 //add
                 tsid_->addMotionTask(*postureTask_, 1e-6, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-                
-                //offset update w.r.t. ee posture
-                this->eeoffset_update(R_joint7_atHome_);     
-                cout << "eeoffset is update to home position" << endl;
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);                                
 
                 //posture
                 q_ref_.setZero(7);
@@ -426,7 +408,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_; 
 
                 //mobility                
@@ -563,7 +544,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_; 
 
                 //mobility                
@@ -689,7 +669,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);                
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;
 
                 //mobility                
@@ -833,7 +812,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
 
@@ -883,7 +861,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
@@ -1011,7 +988,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
@@ -1053,7 +1029,6 @@ namespace RobotController{
                 //inertia shaping    
                 // Me_inv_ = 
                 eeTask_->setDesiredinertia(Me_inv_);
-                eeTask_->setEEoffset(ee_offset_);
             }
             else {   
                 //to make K(x-xd)=0, put K=0 
@@ -1096,7 +1071,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;
                 trajEE_Cubic_->setInitSample(H_ee_ref_);
                 trajEE_Cubic_->setDuration(3.0);
@@ -1164,7 +1138,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
 
@@ -1234,7 +1207,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
 
@@ -1304,7 +1276,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
 
@@ -1374,7 +1345,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
 
@@ -1444,7 +1414,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
 
@@ -1514,7 +1483,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
 
@@ -1698,7 +1666,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
@@ -1771,7 +1738,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
@@ -1889,7 +1855,6 @@ namespace RobotController{
 
                 //ee
                 eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
-                eeTask_->setEEoffset(ee_offset_);
                 trajEE_Cubic_->setStartTime(time_);
                 trajEE_Cubic_->setDuration(2.0);
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                

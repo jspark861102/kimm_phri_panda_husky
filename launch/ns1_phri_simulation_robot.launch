@@ -15,19 +15,19 @@
       <node name="mujoco_ros" pkg="mujoco_ros" type="mujoco_ros" required="true" respawn="false" output="screen">
         <param name="license" type="string" value="$(env HOME)/.mujoco/mjkey.txt" />
         <param name="pub_mode" value="$(arg pub_mode)"/>      
-        <param name="model_file" type="string" value="$(find husky_description)/husky_single/single_husky_panda_phri.xml"/>
+        <param name="model_file" type="string" value="$(find husky_description)/husky_single/mujoco_simulation_phri.xml"/>
       </node>  
       
       <!-- for pinocchio -->
       <param name="robot_urdf_path" type="string" value="$(find husky_description)"/>
-      <param name="robot_urdf" type="string" value="/husky_single/husky_panda_hand_free.urdf"/>
+      <param name="robot_urdf" type="string" value="/husky_single/husky_panda_hand.urdf"/>
       
       <!-- controller -->    
       <node name="kimm_phri_simulation" pkg="kimm_phri_panda_husky" args="-keyboard" type="kimm_phri_panda_husky_simulation" output="screen">
       </node>    
 
       <!-- robot publish -->    
-      <param name="robot_description" textfile="$(find husky_description)/husky_single/husky_panda_rviz_ns1.urdf" />
+      <param name="robot_description" textfile="$(find husky_description)/husky_single/husky_panda_hand_rviz_ns1.urdf" />
       <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" respawn="false" output="screen">
               <param name="use_tf_static"     value="false"/>
               <param name="publish_frequency" value="100"/>
@@ -35,21 +35,13 @@
               <remap from="joint_states"     to="joint_states" />            
       </node>
 
-      <!-- rqt_gui -->    
-      <!-- <group if="$(arg note_book)">
-        <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="- -perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri_panda_husky_sim_aero.perspective" output="screen"/>    
-      </group>
-      <group unless="$(arg note_book)">
-        <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="- -perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri_panda_husky_sim_49inch.perspective" output="screen"/>    
-      </group> -->
-
    </group>
    <group unless="$(arg mobile)">
       <!-- mujoco -->
       <node name="mujoco_ros" pkg="mujoco_ros" type="mujoco_ros" required="true" respawn="false" output="screen">
         <param name="license" type="string" value="$(env HOME)/.mujoco/mjkey.txt" />
         <param name="pub_mode" value="$(arg pub_mode)"/>      
-        <param name="model_file" type="string" value="$(find franka_panda_description)/franka_single/panda_arm_hand_single_phri.xml"/>
+        <param name="model_file" type="string" value="$(find franka_panda_description)/franka_single/mujoco_simulation_phri.xml"/>
       </node>  
       
       <!-- for pinocchio -->
@@ -68,14 +60,6 @@
               <param name="ignore_timestamp" value="true"/>
               <remap from="joint_states"     to="joint_states" />
       </node>
-
-      <!-- rqt_gui -->    
-      <!-- <group if="$(arg note_book)">
-        <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="- -perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri_panda_sim_aero.perspective" output="screen"/>    
-      </group>
-      <group unless="$(arg note_book)">
-        <node name="rqt" pkg="rqt_gui" type="rqt_gui" args="- -perspective-file $(find kimm_phri_panda_husky)/rqt/kimm_phri_panda_sim_49inch.perspective" output="screen"/>    
-      </group> -->
 
     </group>
   </group>  
