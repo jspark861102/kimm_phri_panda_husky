@@ -13,7 +13,7 @@ git clone https://github.com/jspark861102/kimm_trajectory_smoother.git -b melodi
 ```bash
 git clone https://github.com/jspark861102/franka_ros.git #my used version (0.8.1)
 git clone https://github.com/jspark861102/husky.git -b melodic-devel #my used version (0.4.10)
-git clone https://github.com/jspark861102/robotiq_2finger_grippers.git #pymodbuss<2.5.3 required
+git clone https://github.com/jspark861102/kimm_robotiq.git #pymodbuss<2.5.3 required
 git clone https://github.com/jspark861102/kimm_robots_description.git -b melodic
 git clone https://github.com/jspark861102/kimm_mujoco_ros.git -b melodic
 ```
