@@ -572,6 +572,7 @@ void keyboard_event(){
         key = getchar();
         int msg = 0;
         switch (key){
+            //------------- basic motion -------------------------------------------------//  
             case 'g': //gravity mode
                 msg = 0;
                 ctrl_->ctrl_update(msg);
@@ -585,28 +586,32 @@ void keyboard_event(){
                 cout << " " << endl;
                 cout << "home position" << endl;
                 cout << " " << endl;
-                break;                                         
-            case 'w': //null motion ee
+                break;    
+            case 'f': //stop with maintaining current position          
+                msg = 2;
+                ctrl_->ctrl_update(msg);
+                cout << " " << endl;
+                cout << "stop with maintaining current position" << endl;
+                cout << " " << endl;
+                break;      
+
+            //------------- estimation motion -------------------------------------------------//                                   
+            case 'w': //identification motion w/o mobile motion, getcalibration available
                 msg = 11;
                 ctrl_->ctrl_update(msg);
                 cout << " " << endl;
-                cout << "null motion ee in -x axis" << endl;
+                cout << "identification motion w/o mobile motion, getcalibration available" << endl;
                 cout << " " << endl;
                 break;   
-            case 'e': //null motion ee with mobile
+            case 'e': //identification motion w/ mobile motion
                 msg = 12;
                 ctrl_->ctrl_update(msg);
                 cout << " " << endl;
-                cout << "null motion ee in -x axis" << endl;
+                cout << "identification motion w/ mobile motion" << endl;
                 cout << " " << endl;
                 break; 
-            case 'r': //test move ee -0.2x & -0.2z
-                msg = 13;
-                ctrl_->ctrl_update(msg);
-                cout << " " << endl;
-                cout << "move ee -0.2x & -0.2z" << endl;
-                cout << " " << endl;
-                break;             
+
+            //------------- control motion -------------------------------------------------//              
             case 'c': //admittance control
                 msg = 21;
                 ctrl_->ctrl_update(msg);
@@ -627,7 +632,9 @@ void keyboard_event(){
                 cout << " " << endl;
                 cout << "impedance control with nonzero K" << endl;
                 cout << " " << endl;
-                break;          
+                break;     
+
+            //------------- arm ee jog -------------------------------------------------//       
             case 'i': //move ee +0.1z
                 msg = 31;
                 ctrl_->ctrl_update(msg);
@@ -671,34 +678,54 @@ void keyboard_event(){
                 cout << "move ee -0.1 y" << endl;
                 cout << " " << endl;
                 break;    
-            case 'a': //move mobile +0.1x with keeping posture
+
+            //------------- mobile jog -------------------------------------------------//                  
+            case 'a': //move mobile +1.5x with maintaining current arm posture
                 msg = 41;
                 ctrl_->ctrl_update(msg);
                 cout << " " << endl;
-                cout << "move mobile +0.1x with keeping posture" << endl;
+                cout << "move mobile +1.5x with maintaining current arm posture" << endl;
                 cout << " " << endl;
                 break; 
-            case 's': //move mobile -0.1x with keeping posture
+            case 's': //move mobile -1.5x with maintaining current arm posture
                 msg = 42;
                 ctrl_->ctrl_update(msg);
                 cout << " " << endl;
-                cout << "move mobile -0.1x with keeping posture" << endl;
+                cout << "move mobile -1.5x with maintaining current arm posture" << endl;
                 cout << " " << endl;
                 break;
-            case 'd': //move mobile +0.1x with keeping ee
-                msg = 43;
+
+            //------------- test motion -------------------------------------------------//  
+            case '1': //test move: wholebody motion for 0.3x & -0.1z ee pos
+                msg = 101;
                 ctrl_->ctrl_update(msg);
                 cout << " " << endl;
-                cout << "move mobile +0.1x with keeping ee" << endl;
+                cout << "test move of wholebody motion for 0.3x & -0.1z ee pos" << endl;
+                cout << " " << endl;                    
+                break;  
+            case '2': //test move: chicken head motion with +0.1m mobile motion
+                msg = 102;
+                ctrl_->ctrl_update(msg);
                 cout << " " << endl;
+                cout << "test move: chicken head motion with +0.1m mobile motion" << endl;
+                cout << " " << endl;                
                 break; 
-            case 'f': //move mobile -0.1x with keeping ee
-                msg = 44;
+            case '3': //test move: chicken head motion with -0.1m mobile motion
+                msg = 103;
                 ctrl_->ctrl_update(msg);
                 cout << " " << endl;
-                cout << "move mobile -0.1x with keeping ee" << endl;
+                cout << "test move: chicken head motion with -0.1m mobile motion" << endl;
+                cout << " " << endl;                
+                break;    
+            case '4': //test move: mobile base backward during 5sec, maintaining posture
+                msg = 104;
+                ctrl_->ctrl_update(msg);
                 cout << " " << endl;
-                break;      
+                cout << "test move: mobile base backward during 5sec, maintaining posture" << endl;
+                cout << " " << endl;                
+                break;    
+
+            //---------------------- cmd -------------------------------------------------//             
             case 'q': //object estimation
                 if (isstartestimation_){
                     // cout << "end estimation" << endl;
@@ -715,7 +742,7 @@ void keyboard_event(){
                     msg = 11;
                     ctrl_->ctrl_update(msg);
                     cout << " " << endl;
-                    cout << "null motion ee in -x axis for estimation" << endl;
+                    cout << "identification motion w/o mobile motion, getcalibration available" << endl;
                     cout << " " << endl;
                 }
                 break;       
@@ -739,7 +766,9 @@ void keyboard_event(){
                     cout << "start applying Fext" << endl;
                     isFextapplication_ = true; 
                 }
-                break;                       
+                break;    
+
+            //---------------------- etc -------------------------------------------------//                        
             case 'p': //print current EE state
                 msg = 99;
                 ctrl_->ctrl_update(msg);

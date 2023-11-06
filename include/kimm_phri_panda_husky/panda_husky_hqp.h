@@ -97,6 +97,7 @@ namespace RobotController{
             void position_link0_offset(pinocchio::SE3 & oMi);
             void com(Eigen::Vector3d& com);
             void velocity(pinocchio::Motion& vel);
+            void velocity_offset(pinocchio::Motion& vel);
             void velocity_origin(pinocchio::Motion& vel);            
             void acceleration(pinocchio::Motion& accel);
             void acceleration_origin(pinocchio::Motion & accel);

@@ -95,6 +95,7 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
   void pubEEState();
   void pubBaseState();
   void pubFextGlobal();
+  void pubFextLocal();
   void pubJointStates();
 
   //////////////////// object estimation /////////////////
@@ -104,8 +105,11 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
   double saturation(double x, double limit);
   void FT_measured_pub();
   void vel_accel_pub();  
+  void input_wrench_pub();
   VectorXd FT_local_to_global(VectorXd & f_local);
   Vector6d FT_global_to_local(Vector6d & f_global);
+  void velocity_offset_pub();
+  void robot_g_local_pub();
   void test_publication();
   ////////////////////////////////////////////////////////
 
@@ -138,10 +142,15 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
       double gain = sample_time / (sample_time + (1.0 / (2.0 * M_PI * cutoff_frequency)));
       return gain * x + (1 - gain) * y_last;
   }
-  Vector6d highpassFilter(double sample_time, const Vector6d x, const Vector6d x_last, const Vector6d y_last, double cutoff_frequency){ //cutoff_frequency is in [Hz]
-      double gain = sample_time / (sample_time + (1.0 / (2.0 * M_PI * cutoff_frequency)));
+  Vector6d highpassFilter(double sample_time, const Vector6d x, const Vector6d x_last, const Vector6d y_last, double cutoff_frequency){ //cutoff_frequency is in [Hz]    
+      double gain = 1.0 / (1.0 + (2.0 * M_PI * cutoff_frequency*sample_time));
       return gain * y_last + gain * (x - x_last);
   }
+  double highpassFilter(double sample_time, double x, double x_last, double y_last, double cutoff_frequency){ //cutoff_frequency is in [Hz]    
+      double gain = 1.0 / (1.0 + (2.0 * M_PI * cutoff_frequency*sample_time));
+      return gain * y_last + gain * (x - x_last);
+  }
+
   void InitMob(){
       mob_.torque_d_prev_.setZero(7);
       mob_.d_torque_.setZero(7);
@@ -176,8 +185,8 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
     ros::Subscriber odom_subs_, husky_state_subs_, franka_gripper_state_subs_, robotiq_state_subs_, teleop_joy_subs_;
     realtime_tools::RealtimePublisher<geometry_msgs::Twist> husky_ctrl_pub_;
     ros::Publisher ee_state_pub_, torque_state_pub_, joint_state_pub_;
-    ros::Publisher base_state_pub_, husky_odom_pub_;
-    ros::Publisher Fext_local_forObjectEstimation_pub_, object_parameter_pub_, vel_pub_, accel_pub_, Fext_global_pub_, test_pub_;
+    ros::Publisher base_state_pub_, husky_odom_pub_, velocity_offset_pub_, Fext_local_pub_, robot_g_local_pub_;
+    ros::Publisher Fext_local_forObjectEstimation_pub_, object_parameter_pub_, vel_pub_, accel_pub_, Fext_global_pub_, Finput_local_pub_, test_pub_;
     ros::ServiceClient setload_client;
     tf::TransformBroadcaster* br_;
     tf::TransformListener listener_;
@@ -242,7 +251,7 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
     double n_param, m_FT;
     Eigen::MatrixXd A, H, Q, R, P;
     Eigen::VectorXd h, FT_measured, param_estimated_, param_used_, param_d435_, param_tip_, robot_g_local_, FT_object_, param_true_;
-    pinocchio::Motion vel_param, acc_param;  
+    pinocchio::Motion vel_param, acc_param, velocity_offset_;  
     pinocchio::SE3 oMi_;
     Vector7d torque_sensor_bias_, franka_ddq_for_param_, franka_dq_prev_;
     Vector6d franka_v_, franka_a_, franka_a_filtered_, F_ext_bias_;
@@ -251,6 +260,7 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
     Vector6d f_used_;
     ifstream fin_;
     double est_time_;
+    Vector6d f_impedance_, f_impedance_calibration_, f_impedance_prev_, f_impedance_HPF_, f_filtered_prev_, f_filtered_HPF_;
 
     // Dynamic reconfigure    
     std::unique_ptr<dynamic_reconfigure::Server<kimm_phri_panda_husky::ekf_paramConfig>> ekf_param_;

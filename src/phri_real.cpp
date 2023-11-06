@@ -15,7 +15,6 @@ namespace kimm_franka_husky_controllers
 
 bool pHRIFrankaHuskyController::init(hardware_interface::RobotHW* robot_hw, ros::NodeHandle& node_handle)
 {
-
   n_node_ = node_handle; 
   node_handle.getParam("/robot_group", group_name_);    
   node_handle.getParam("/load_gripper", load_gripper_);    
@@ -59,11 +58,22 @@ bool pHRIFrankaHuskyController::init(hardware_interface::RobotHW* robot_hw, ros:
 
   // object estimation 
   object_parameter_pub_ = node_handle.advertise<kimm_phri_msgs::ObjectParameter>("/" + group_name_ + "/real_robot/object_parameter", 5);
+  
+  //calibrated LOCAL external force only for estimation
   Fext_local_forObjectEstimation_pub_ = node_handle.advertise<geometry_msgs::Wrench>("/" + group_name_ + "/real_robot/Fext_local_forObjectEstimation", 5);
+  
   Fext_global_pub_ = node_handle.advertise<geometry_msgs::Wrench>("/" + group_name_ + "/real_robot/Fext_global", 5);
+  Fext_local_pub_ = node_handle.advertise<geometry_msgs::Wrench>("/" + group_name_ + "/real_robot/Fext_local", 5);  
+  Finput_local_pub_ = node_handle.advertise<geometry_msgs::Wrench>("/" + group_name_ + "/real_robot/Finput_local", 5);
+  robot_g_local_pub_ = node_handle.advertise<std_msgs::Float32MultiArray>("/" + group_name_ + "/real_robot/robot_g_local", 5);
+
+  //only franka vel & accel
   vel_pub_ = node_handle.advertise<geometry_msgs::Twist>("/" + group_name_ + "/real_robot/object_velocity", 5);
   accel_pub_ = node_handle.advertise<geometry_msgs::Twist>("/" + group_name_ + "/real_robot/object_acceleration", 5);   
-
+  
+  //whole body velocity
+  velocity_offset_pub_ = node_handle.advertise<geometry_msgs::Twist>("/" + group_name_ + "/real_robot/velocity_offset", 5);
+  
   test_pub_ = node_handle.advertise<geometry_msgs::Wrench>("/" + group_name_ + "/real_robot/test", 5);
 
   // ************ object estimation *************** //               
@@ -254,6 +264,12 @@ void pHRIFrankaHuskyController::starting(const ros::Time& time) {
   f_filtered_.setZero();      
   fh_force_.setZero();  
   fh_force_local_.setZero();  
+  f_impedance_.setZero();
+  f_impedance_calibration_.setZero();
+  f_impedance_prev_.setZero();
+  f_impedance_HPF_.setZero(); 
+  f_filtered_prev_.setZero();  
+  f_filtered_HPF_.setZero();     
 }
 
 void pHRIFrankaHuskyController::update(const ros::Time& time, const ros::Duration& period) {    
@@ -413,28 +429,56 @@ void pHRIFrankaHuskyController::update(const ros::Time& time, const ros::Duratio
   Kd(6, 6) = 0.2; 
   franka_torque_ -= Kd * dq_filtered_;  //additional damping torque (independent of mass matrix)
 
-  // apply object dynamics---------------------------------------------------------------//  
-  param_d435_ << 0.07, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0; 
-  param_tip_ << 0.12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0; //customized tip mass : 130g, original tip mass : 10g  
-  // param_true_ << 0.35, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0; //profile mass = 0.7kg, half for robot and half for human
-  // param_true_ << 0.77, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0; //profile mass = 1.54kg, half for robot and half for human
-  param_true_ << 1.115, 0.0, 0.0, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0; //profile mass = 2.23kg, half for robot and half for human
+  // apply object dynamics---------------------------------------------------------------//    
+  // param_true_ << 1.115, 0.0, 0.0, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0; //profile mass = 2.23kg, half for robot and half for human
+  // param_true_ << 0.775, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0; //profile mass = 1.550kg, half for robot and half for human
+  // param_true_ << 1.28, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0; //profile mass = 2.560kg, half for robot and half for human
+  param_true_ << 1.405, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0; //wood shelf = 2.81kg, half for robot and half for human
 
-  if (isobjectdynamics_) {    
-    // FT_object_ = objdyn.h(param_used_ + param_d435_ + param_tip_, vel_param.toVector(), acc_param.toVector(), robot_g_local_);        
-    // FT_object_ = objdyn.h(param_true_ + param_d435_ + param_tip_, vel_param.toVector(), acc_param.toVector(), robot_g_local_);        
+  if (isobjectdynamics_) {        
     FT_object_ = objdyn.h(param_true_ , vel_param.toVector(), acc_param.toVector(), robot_g_local_);        
+    // FT_object_ = objdyn.h(param_used_ , vel_param.toVector(), acc_param.toVector(), robot_g_local_);        
   }    
   else {
     // FT_object_ = objdyn.h(              param_d435_ + param_tip_, vel_param.toVector(), acc_param.toVector(), robot_g_local_);    
     FT_object_.setZero();
   }     
   franka_torque_ -= robot_J_local_.transpose() * FT_object_;
+
+
+  //make calibrated f for impedance control -----------------------------------------------//        
+  // case1 : use calibrated f_filtered
+  f_impedance_ = f_filtered_;    
+  if (mob_type_ == 1){ //compliance with Fext    
+    f_impedance_ = f_filtered_ - f_impedance_calibration_;
+  }  
+  // f_impedance_HPF_ = highpassFilter( dt_, f_impedance_, f_impedance_prev_, f_impedance_HPF_, 0.1); //in Hz, Vector6d
+  // f_impedance_prev_ = f_impedance_;        
   
-  //apply Fext to the franka_torque_ for compliance or robust control--------------------//        
+  // fh_force_ =  Fh_ * f_impedance_HPF_;     
+  // fh_force_local_ = Fh_local_ * FT_global_to_local(f_impedance_HPF_);      
+
+  // fh_force_ =  Fh_ * f_impedance_;     
+  // fh_force_local_ = Fh_local_ * FT_global_to_local(f_impedance_);      
+
+  // case2 : use f_filtered with HPF for rx-axis
+  f_filtered_HPF_(0) = f_filtered_(0);
+  f_filtered_HPF_(1) = f_filtered_(1);
+  f_filtered_HPF_(2) = f_filtered_(2);
+  f_filtered_HPF_(4) = f_filtered_(4);
+  f_filtered_HPF_(5) = f_filtered_(5);
+
+  f_filtered_HPF_(3) = highpassFilter( dt_, f_filtered_(3), f_filtered_prev_(3), f_filtered_HPF_(3), 0.1); //in Hz, Vector6d
+  f_filtered_prev_(3) = f_filtered_(3);    
+
+  // fh_force_ =  Fh_ * (f_filtered_HPF_ - FT_local_to_global(FT_object_));          //z-axis   
+  // fh_force_local_ = Fh_local_ * (FT_global_to_local(f_filtered_) - FT_object_);   //y-axis   
+
+  //case3 : use raw f_filtered_
   fh_force_ =  Fh_ * (f_filtered_ - FT_local_to_global(FT_object_));     
   fh_force_local_ = Fh_local_ * (FT_global_to_local(f_filtered_) - FT_object_);      
 
+  //apply Fext to the franka_torque_ for compliance or robust control--------------------//        
   if (ctrl_->ctrltype() != 0){
     if (mob_type_ == 1){ //compliance with Fext    
         //object teaching : z axis from rx axis               
@@ -448,8 +492,7 @@ void pHRIFrankaHuskyController::update(const ros::Time& time, const ros::Duratio
       franka_torque_ -= robot_J_.transpose().col(1) * f_filtered_(1); //robust
       franka_torque_ -= robot_J_.transpose().col(2) * f_filtered_(2); //robust      
     }
-  }  
-  this->test_publication();  
+  }    
 
   // torque saturation--------------------//  
   franka_torque_ << this->saturateTorqueRate(franka_torque_, robot_tau_d_);
@@ -502,6 +545,7 @@ void pHRIFrankaHuskyController::update(const ros::Time& time, const ros::Duratio
   this->pubEEState();                  //just update ee_state_msg_ by pinocchio and publish it
   this->pubJointStates();
   this->pubFextGlobal();  
+  this->pubFextLocal();  
     
   if (ismobile_) this->setHuskyCommand();  //just update robot_command_msg_ by husky_qacc_
   this->setFrankaCommand();                //just update robot_command_msg_ by franka_torque_   
@@ -509,11 +553,16 @@ void pHRIFrankaHuskyController::update(const ros::Time& time, const ros::Duratio
 
   //Object estimation --------------------------------------------------------------//
   // ************ object estimation *************** //              
-  this->vel_accel_pub();        
-  this->FT_measured_pub();        
-  this->getObjParam();                                    // object estimation
-  this->ObjectParameter_pub();                            // data plot for monitoring
-  // ********************************************** //    
+  this->vel_accel_pub();                                  //franka's vel & accel in local
+  this->input_wrench_pub();                               //franka_torque in local
+  this->FT_measured_pub();                                //franka's external wrench in local
+  this->getObjParam();                                    //object estimation
+  this->ObjectParameter_pub();                            //data plot for monitoring
+  // ********************************************** //  
+  this->velocity_offset_pub();                            //whole body velocity in local
+  this->robot_g_local_pub();                            //whole body velocity in local
+
+  this->test_publication();  
 
   //Debug ------------------------------------------------------------------------//
   if (print_rate_trigger_())
@@ -531,19 +580,49 @@ void pHRIFrankaHuskyController::stopping(const ros::Time& time){
 
 void pHRIFrankaHuskyController::test_publication() {    
   geometry_msgs::Wrench test_msg;  
-  test_msg.force.x = fh_force_(0);
-  test_msg.force.y = fh_force_(1);
-  test_msg.force.z = fh_force_(2);
+  test_msg.force.x = f_filtered_HPF_(3);
+  test_msg.force.y = f_filtered_HPF_(4);
+  test_msg.force.z = f_filtered_HPF_(5);
+
+  // test_msg.force.x = f_impedance_HPF_(3);
+  // test_msg.force.y = f_impedance_HPF_(4);
+  // test_msg.force.z = f_impedance_HPF_(5);
 
   // test_msg.torque.x =fh_force_(3);
   // test_msg.torque.y =fh_force_(4);
-  // test_msg.torque.z =fh_force_(5);
+  // test_msg.torque.z =fh_force_(5);  
 
-  test_msg.torque.x =fh_force_local_(0);
-  test_msg.torque.y =fh_force_local_(1);
-  test_msg.torque.z =fh_force_local_(2);
+  test_msg.torque.x =f_filtered_(3);
+  test_msg.torque.y =f_filtered_(4);
+  test_msg.torque.z =f_filtered_(5);
 
   test_pub_.publish(test_msg);    
+}
+
+void pHRIFrankaHuskyController::velocity_offset_pub() {    
+  ctrl_->velocity_offset(velocity_offset_);
+  
+  geometry_msgs::Twist vel_offset_msg;   
+
+  vel_offset_msg.linear.x = velocity_offset_.linear()[0];
+  vel_offset_msg.linear.y = velocity_offset_.linear()[1];
+  vel_offset_msg.linear.z = velocity_offset_.linear()[2];
+  vel_offset_msg.angular.x = velocity_offset_.angular()[0];
+  vel_offset_msg.angular.y = velocity_offset_.angular()[1];
+  vel_offset_msg.angular.z = velocity_offset_.angular()[2];
+
+  velocity_offset_pub_.publish(vel_offset_msg);
+}
+
+void pHRIFrankaHuskyController::robot_g_local_pub() {        
+  std_msgs::Float32MultiArray g_local_msg;   
+
+  g_local_msg.data.resize(3);
+  g_local_msg.data[0] = robot_g_local_(0);
+  g_local_msg.data[1] = robot_g_local_(1);
+  g_local_msg.data[2] = robot_g_local_(2);
+
+  robot_g_local_pub_.publish(g_local_msg);
 }
 
 // ************************************************ object estimation start *************************************************** //                       
@@ -662,6 +741,21 @@ void pHRIFrankaHuskyController::vel_accel_pub(){
     accel_pub_.publish(accel_msg);
 }
 
+void pHRIFrankaHuskyController::input_wrench_pub() {        
+    Vector6d franka_wrench_local;
+    franka_wrench_local << robot_J_local_.transpose().completeOrthogonalDecomposition().pseudoInverse() * franka_torque_;
+
+    geometry_msgs::Wrench Finput_local_msg;  
+    Finput_local_msg.force.x = franka_wrench_local[0];
+    Finput_local_msg.force.y = franka_wrench_local[1];
+    Finput_local_msg.force.z = franka_wrench_local[2];
+    Finput_local_msg.torque.x = franka_wrench_local[3];
+    Finput_local_msg.torque.y = franka_wrench_local[4];
+    Finput_local_msg.torque.z = franka_wrench_local[5];
+
+    Finput_local_pub_.publish(Finput_local_msg);
+}
+
 void pHRIFrankaHuskyController::FT_measured_pub() {        
     //obtained from pinocchio for the local frame--------//    
     pinocchio::Force f_global, f_local;    
@@ -742,8 +836,8 @@ void pHRIFrankaHuskyController::getObjParam(){
 
     if (isstartestimation_) {
 
-        h = objdyn.h(param_estimated_, vel_param.toVector(), acc_param.toVector(), robot_g_local_); 
         H = objdyn.H(param_estimated_, vel_param.toVector(), acc_param.toVector(), robot_g_local_); 
+        h = objdyn.h(param_estimated_, vel_param.toVector(), acc_param.toVector(), robot_g_local_); 
 
         ekf->update(FT_measured, dt_, A, H, h, Q, R); //Q & R update from dynamic reconfigure
         param_estimated_ = ekf->state();  
@@ -998,6 +1092,32 @@ void pHRIFrankaHuskyController::pubFextGlobal(){
   Fext_global_pub_.publish(Fext_global_msg);  
 }
 
+void pHRIFrankaHuskyController::pubFextLocal(){    
+  pinocchio::Force f_global, f_local;    
+
+  //GLOBAL ---------------------------------------//
+  f_global.linear()[0] = f_filtered_(0);
+  f_global.linear()[1] = f_filtered_(1);
+  f_global.linear()[2] = f_filtered_(2);
+  f_global.angular()[0] = f_filtered_(3);
+  f_global.angular()[1] = f_filtered_(4);
+  f_global.angular()[2] = f_filtered_(5);
+
+  //LOCAL ---------------------------------------//              
+  f_local = oMi_.actInv(f_global); //global to local        
+  
+  geometry_msgs::Wrench Fext_local_msg;  
+
+  Fext_local_msg.force.x = f_local.linear()[0];
+  Fext_local_msg.force.y = f_local.linear()[1];
+  Fext_local_msg.force.z = f_local.linear()[2];
+  Fext_local_msg.torque.x = f_local.angular()[0];
+  Fext_local_msg.torque.y = f_local.angular()[1];
+  Fext_local_msg.torque.z = f_local.angular()[2]; 
+
+  Fext_local_pub_.publish(Fext_local_msg);  
+}
+
 void pHRIFrankaHuskyController::setFrankaCommand(){  
   robot_command_msg_.MODE = 1;
   robot_command_msg_.header.stamp = ros::Time::now();
@@ -1066,7 +1186,7 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
   int msg = 0;
   if(joy_msg->buttons[5]){ //R1 button pushed 
     
-    //gravity
+    //gravity, g
     if (joy_msg->buttons[13]) { //center     button pushed
       if (!isbutton_pushed_(13)) {
         msg = 0;          
@@ -1082,7 +1202,7 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
     }
     else isbutton_pushed_(13) = 0;
 
-    //home
+    //home, h
     if (joy_msg->buttons[1])  { //cross      button pushed
       if (!isbutton_pushed_(1)) {
         msg = 1;
@@ -1094,6 +1214,7 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
 
         //Fext
         mob_type_ = 0;
+        f_impedance_calibration_.setZero();
         cout << "end applying Fext" << endl;     
 
         isbutton_pushed_(1) = 1;
@@ -1101,7 +1222,7 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
     }
     else isbutton_pushed_(1) = 0;
 
-    //estimation
+    //estimation, q&e
     if (joy_msg->buttons[2])  { //circle     button pushed      
       if (!isbutton_pushed_(2)) {
         cout << "start estimation" << endl;
@@ -1118,7 +1239,7 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
         msg = 12;
         ctrl_->ctrl_update(msg);
         cout << " " << endl;
-        cout << "null motion ee in -x axis for estimation" << endl;
+        cout << "identification motion w/ mobile motion " << endl;
         cout << " " << endl;
         if(ismobile_) husky_qvel_prev_.setZero();  
         
@@ -1127,7 +1248,7 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
     }
     else isbutton_pushed_(2) = 0;
 
-    //set estimated parameter
+    //set estimated parameter, x
     if (joy_msg->buttons[0])  { //square     button pushed
       if (!isbutton_pushed_(0)) {
         if (isobjectdynamics_){
@@ -1145,7 +1266,7 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
     }
     else isbutton_pushed_(0) = 0;
 
-    //impedance control
+    //impedance control, v&b
     if (joy_msg->buttons[3])  { //triangle button pushed
       if (!isbutton_pushed_(3)) {
         msg = 22;
@@ -1157,6 +1278,7 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
 
         //Fext
         mob_type_ = 1;
+        f_impedance_calibration_ = f_filtered_; //calibration
         cout << "start applying Fext" << endl;     
 
         isbutton_pushed_(3) = 1;     
@@ -1166,7 +1288,7 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
   }
 
   if(joy_msg->buttons[7]){ //R2 button pushed 
-    //estimation in static
+    //estimation in static, q&w
     if (joy_msg->buttons[2])  { //circle button pushed      
       if (!isbutton_pushed_(2)) {
         cout << "start estimation" << endl;
@@ -1183,7 +1305,7 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
         msg = 11;
         ctrl_->ctrl_update(msg);
         cout << " " << endl;
-        cout << "null motion ee in -x axis for estimation" << endl;
+        cout << "identification motion w/o mobile motion, getcalibration available" << endl;
         cout << " " << endl;
         if(ismobile_) husky_qvel_prev_.setZero();  
         
@@ -1192,22 +1314,37 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
     }
     else isbutton_pushed_(2) = 0;
 
-    //base backward
+    //base backward, s
     if (joy_msg->buttons[3])  { //triangle button pushed
       if (!isbutton_pushed_(3)) {
         msg = 42;
         ctrl_->ctrl_update(msg);
         cout << " " << endl;
-        cout << "move mobile -0.1x with keeping posture" << endl;
+        cout << "move mobile -1.5x with current arm posture" << endl;
         cout << " " << endl;
         if(ismobile_) husky_qvel_prev_.setZero();
 
          isbutton_pushed_(3) = 1;     
       }
     } 
-    else isbutton_pushed_(3) = 0;          
+    else isbutton_pushed_(3) = 0;        
+
+    //stop with maintaining current position, f
+    if (joy_msg->buttons[0])  { //square button pushed
+      if (!isbutton_pushed_(0)) {
+        msg = 2;
+        ctrl_->ctrl_update(msg);
+        cout << " " << endl;
+        cout << "stop with maintaining current position" << endl;
+        cout << " " << endl;
+        if(ismobile_) husky_qvel_prev_.setZero();
+
+         isbutton_pushed_(0) = 1;     
+      }
+    } 
+    else isbutton_pushed_(0) = 0;     
     
-    //gripper
+    //gripper, z
     if (joy_msg->buttons[1])  { //cross button pushed
       if (!isbutton_pushed_(1)) {
         if (load_gripper_) { //franka gripper
@@ -1266,6 +1403,7 @@ void pHRIFrankaHuskyController::modeChangeReaderProc(){
 
     int msg = 0;
     switch (key){
+      //------------- basic motion -------------------------------------------------//  
       case 'g': //gravity mode
           msg = 0;          
           ctrl_->ctrl_update(msg);          
@@ -1284,39 +1422,37 @@ void pHRIFrankaHuskyController::modeChangeReaderProc(){
           cout << "home position" << endl;
           cout << " " << endl;
           if(ismobile_) husky_qvel_prev_.setZero();
-          break;     
-      case 'w': //null motion ee
+          mob_type_ = 0;
+          f_impedance_calibration_.setZero();
+          break;   
+      case 'f': //stop with maintaining current position          
+          msg = 2;
+          ctrl_->ctrl_update(msg);
+          cout << " " << endl;
+          cout << "stop with maintaining current position" << endl;
+          cout << " " << endl;
+          if(ismobile_) husky_qvel_prev_.setZero();                    
+          break;    
+
+      //------------- estimation motion -------------------------------------------------//  
+      case 'w': //identification motion w/o mobile motion, getcalibration available
           msg = 11;
           ctrl_->ctrl_update(msg);
           cout << " " << endl;
-          cout << "null motion ee in -x axis" << endl;
+          cout << "identification motion w/o mobile motion, getcalibration available" << endl;
           cout << " " << endl;    
           if(ismobile_) husky_qvel_prev_.setZero();      
-          break;  
-      case '1': //null motion ee
-          msg = 101;
-          ctrl_->ctrl_update(msg);
-          cout << " " << endl;
-          cout << "null motion ee in -x axis" << endl;
-          cout << " " << endl;    
-          if(ismobile_) husky_qvel_prev_.setZero();      
-          break;                 
-      case 'e': //null motion ee
+          break;        
+      case 'e': //identification motion w/ mobile motion 
           msg = 12;
           ctrl_->ctrl_update(msg);
           cout << " " << endl;
-          cout << "null motion ee in -x axis" << endl;
+          cout << "identification motion w/ mobile motion " << endl;
           cout << " " << endl;    
           if(ismobile_) husky_qvel_prev_.setZero();      
           break;    
-      case 'r': //test move ee -0.2x & -0.2z
-          msg = 13;
-          ctrl_->ctrl_update(msg);
-          cout << " " << endl;
-          cout << "move ee -0.2x & -0.2z" << endl;
-          cout << " " << endl;    
-          if(ismobile_) husky_qvel_prev_.setZero();      
-          break;    
+      
+      //------------- control motion -------------------------------------------------//  
       case 'c': //admittance control
           msg = 21;
           ctrl_->ctrl_update(msg);
@@ -1340,7 +1476,9 @@ void pHRIFrankaHuskyController::modeChangeReaderProc(){
           cout << "impedance control with nonzero K" << endl;
           cout << " " << endl;
           if(ismobile_) husky_qvel_prev_.setZero();
-          break;          
+          break;             
+
+      //------------- arm ee jog -------------------------------------------------//  
       case 'i': //move ee +0.1z
           msg = 31;
           ctrl_->ctrl_update(msg);
@@ -1388,8 +1526,10 @@ void pHRIFrankaHuskyController::modeChangeReaderProc(){
           cout << "move ee -0.1 y" << endl;
           cout << " " << endl;
           if(ismobile_) husky_qvel_prev_.setZero();
-          break;              
-      case 'a': //move mobile +0.1x with keeping posture
+          break; 
+
+      //------------- mobile jog -------------------------------------------------//               
+      case 'a': //move mobile +1.5x with maintaining current arm posture
           msg = 41;
           ctrl_->ctrl_update(msg);
           cout << " " << endl;
@@ -1397,39 +1537,50 @@ void pHRIFrankaHuskyController::modeChangeReaderProc(){
           cout << " " << endl;
           if(ismobile_) husky_qvel_prev_.setZero();
           break; 
-      case 's': //move mobile -0.1x with keeping posture
+      case 's': //move mobile -1.5x with maintaining current arm posture
           msg = 42;
           ctrl_->ctrl_update(msg);
           cout << " " << endl;
-          cout << "move mobile -0.1x with keeping posture" << endl;
+          cout << "move mobile -1.5x with current arm posture" << endl;
           cout << " " << endl;
           if(ismobile_) husky_qvel_prev_.setZero();
-          break;
-      case 'd': //move mobile +0.1x with keeping ee
-          msg = 43;
+          break;   
+
+      //------------- test motion -------------------------------------------------//  
+      case '1': //test move: wholebody motion for 0.3x & -0.1z ee pos
+          msg = 101;
           ctrl_->ctrl_update(msg);
           cout << " " << endl;
-          cout << "move mobile +0.1x with keeping ee" << endl;
+          cout << "test move of wholebody motion for 0.3x & -0.1z ee pos" << endl;
+          cout << " " << endl;    
+          if(ismobile_) husky_qvel_prev_.setZero();      
+          break;  
+      case '2': //test move: chicken head motion with +0.1m mobile motion
+          msg = 102;
+          ctrl_->ctrl_update(msg);
+          cout << " " << endl;
+          cout << "test move: chicken head motion with +0.1m mobile motion" << endl;
           cout << " " << endl;
           if(ismobile_) husky_qvel_prev_.setZero();
           break; 
-      case 'f': //move mobile -0.1x with keeping ee
-          msg = 44;
+      case '3': //test move: chicken head motion with -0.1m mobile motion
+          msg = 103;
           ctrl_->ctrl_update(msg);
           cout << " " << endl;
-          cout << "move mobile -0.1x with keeping ee" << endl;
+          cout << "test move: chicken head motion with -0.1m mobile motion" << endl;
           cout << " " << endl;
           if(ismobile_) husky_qvel_prev_.setZero();
-          break;                
-      case 't': //base backward
-          msg = 45;
+          break;    
+      case '4': //test move: mobile base backward during 5sec, maintaining posture
+          msg = 104;
           ctrl_->ctrl_update(msg);
           cout << " " << endl;
-          cout << "base backward" << endl;
+          cout << "test move: mobile base backward during 5sec, maintaining posture" << endl;
           cout << " " << endl;
           if(ismobile_) husky_qvel_prev_.setZero();
-          break;           
-      
+          break;                          
+
+      //---------------------- cmd -------------------------------------------------//             
       case 'q': //object estimation
           if (isstartestimation_){
               // cout << "end estimation" << endl;
@@ -1459,7 +1610,7 @@ void pHRIFrankaHuskyController::modeChangeReaderProc(){
               msg = 11;
               ctrl_->ctrl_update(msg);
               cout << " " << endl;
-              cout << "null motion ee in -x axis for estimation" << endl;
+              cout << "identification motion w/o mobile motion, getcalibration available" << endl;
               cout << " " << endl;
               if(ismobile_) husky_qvel_prev_.setZero();
           }
@@ -1485,6 +1636,8 @@ void pHRIFrankaHuskyController::modeChangeReaderProc(){
               cout << "start applying Fext" << endl;                            
           }
           break;  
+
+      //---------------------- etc -------------------------------------------------//  
       case 'p': //print current EE state
           msg = 99;
           ctrl_->ctrl_update(msg);
