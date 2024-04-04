@@ -74,7 +74,7 @@ bool pHRIFrankaHuskyController::init(hardware_interface::RobotHW* robot_hw, ros:
   //whole body velocity
   velocity_offset_pub_ = node_handle.advertise<geometry_msgs::Twist>("/" + group_name_ + "/real_robot/velocity_offset", 5);
   
-  test_pub_ = node_handle.advertise<geometry_msgs::Wrench>("/" + group_name_ + "/real_robot/test", 5);
+  // eigen_pub_ = node_handle.advertise<std_msgs::Float32MultiArray>("/" + group_name_ + "/real_robot/eigenvalues", 5);
 
   // ************ object estimation *************** //               
   isstartestimation_ = false;  
@@ -82,6 +82,8 @@ bool pHRIFrankaHuskyController::init(hardware_interface::RobotHW* robot_hw, ros:
   this->getObjParam_init();  
   isobjectdynamics_ = false;
   ismasspractical_ = true;  
+  realtimeupdate_ = false;
+  isinteractiongain_ = true;
   est_time_ = 0.0;    
   // ********************************************** //   
   
@@ -406,7 +408,8 @@ void pHRIFrankaHuskyController::update(const ros::Time& time, const ros::Duratio
   // ctrl_->position(oMi_);
   // ctrl_->position_offset(oMi_);
   ctrl_->position_link0_offset(oMi_);
-  ctrl_->Fh_gain_matrix(Fh_, Fh_local_); //local
+  ctrl_->Fh_gain_matrix(Fh_, Fh_local_, isinteractiongain_); //local
+  //ctrl_->CartesianInertia(Me_); //local, for TASE revision
 
   //for practical manipulation--------------------//    
   robot_mass_practical_ = robot_mass_;
@@ -436,8 +439,8 @@ void pHRIFrankaHuskyController::update(const ros::Time& time, const ros::Duratio
   param_true_ << 1.405, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0; //wood shelf = 2.81kg, half for robot and half for human
 
   if (isobjectdynamics_) {        
-    FT_object_ = objdyn.h(param_true_ , vel_param.toVector(), acc_param.toVector(), robot_g_local_);        
-    // FT_object_ = objdyn.h(param_used_ , vel_param.toVector(), acc_param.toVector(), robot_g_local_);        
+    // FT_object_ = objdyn.h(param_true_ , vel_param.toVector(), acc_param.toVector(), robot_g_local_);        
+    FT_object_ = objdyn.h(param_used_ , vel_param.toVector(), acc_param.toVector(), robot_g_local_);        
   }    
   else {
     // FT_object_ = objdyn.h(              param_d435_ + param_tip_, vel_param.toVector(), acc_param.toVector(), robot_g_local_);    
@@ -560,9 +563,9 @@ void pHRIFrankaHuskyController::update(const ros::Time& time, const ros::Duratio
   this->ObjectParameter_pub();                            //data plot for monitoring
   // ********************************************** //  
   this->velocity_offset_pub();                            //whole body velocity in local
-  this->robot_g_local_pub();                            //whole body velocity in local
+  this->robot_g_local_pub();                              //whole body velocity in local
 
-  this->test_publication();  
+  // this->pubInertiaEigen();                                //for TASE revision
 
   //Debug ------------------------------------------------------------------------//
   if (print_rate_trigger_())
@@ -578,25 +581,18 @@ void pHRIFrankaHuskyController::stopping(const ros::Time& time){
     ROS_INFO("Robot Controller::stopping");              
 } 
 
-void pHRIFrankaHuskyController::test_publication() {    
-  geometry_msgs::Wrench test_msg;  
-  test_msg.force.x = f_filtered_HPF_(3);
-  test_msg.force.y = f_filtered_HPF_(4);
-  test_msg.force.z = f_filtered_HPF_(5);
-
-  // test_msg.force.x = f_impedance_HPF_(3);
-  // test_msg.force.y = f_impedance_HPF_(4);
-  // test_msg.force.z = f_impedance_HPF_(5);
-
-  // test_msg.torque.x =fh_force_(3);
-  // test_msg.torque.y =fh_force_(4);
-  // test_msg.torque.z =fh_force_(5);  
-
-  test_msg.torque.x =f_filtered_(3);
-  test_msg.torque.y =f_filtered_(4);
-  test_msg.torque.z =f_filtered_(5);
-
-  test_pub_.publish(test_msg);    
+void pHRIFrankaHuskyController::pubInertiaEigen() {    
+  std_msgs::Float32MultiArray eigenvalues_msg;     
+  
+  eigenvalues_msg.data.resize(6);
+  eigenvalues_msg.data[0] = Me_.eigenvalues().real()[0];
+  eigenvalues_msg.data[1] = Me_.eigenvalues().real()[1];
+  eigenvalues_msg.data[2] = Me_.eigenvalues().real()[2];
+  eigenvalues_msg.data[3] = Me_.eigenvalues().real()[3];
+  eigenvalues_msg.data[4] = Me_.eigenvalues().real()[4];
+  eigenvalues_msg.data[5] = Me_.eigenvalues().real()[5];
+  
+  eigen_pub_.publish(eigenvalues_msg);
 }
 
 void pHRIFrankaHuskyController::velocity_offset_pub() {    
@@ -783,12 +779,23 @@ void pHRIFrankaHuskyController::FT_measured_pub() {
         param_used_ = param_estimated_;
         cout << "estimated parameter" << endl;
         cout << param_used_.transpose() << endl;                
-      }
-      
+
+        //for TASE revision        
+        realtimeupdate_ = true;        
+      }            
     }
     else {
       F_ext_bias_.setZero();
     }                  
+
+    //for TASE revision
+    if (realtimeupdate_){
+      if (time_ - est_time_ > (traj_length_in_time_ + 2.0) ){                      
+        isobjectdynamics_ = true; //apply object dynamics after finishing estimation
+        realtimeupdate_ = false;     
+        cout << "isobjectdynamics_ set to TRUE" << endl;
+      }
+    }    
     
     //GLOBAL ---------------------------------------//
     f_global.linear()[0] = f_filtered_(0) - F_ext_bias_(0);
@@ -1186,6 +1193,24 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
   int msg = 0;
   if(joy_msg->buttons[5]){ //R1 button pushed 
     
+    //impedance gain change
+    if (joy_msg->buttons[12]) { //ps     button pushed
+      if (!isbutton_pushed_(12)) {        
+        if (isinteractiongain_){
+            cout << "no object-aware impedance gain" << endl;
+            isinteractiongain_ = false;            
+        }
+        else{
+            cout << "actvie object-aware impedance gain" << endl;
+            isinteractiongain_ = true;             
+        }
+        if(ismobile_) husky_qvel_prev_.setZero();
+
+        isbutton_pushed_(12) = 1;     
+     }
+    }
+    else isbutton_pushed_(12) = 0;
+
     //gravity, g
     if (joy_msg->buttons[13]) { //center     button pushed
       if (!isbutton_pushed_(13)) {
@@ -1228,8 +1253,9 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
         cout << "start estimation" << endl;
         isstartestimation_ = true; 
         tau_bias_init_flag = true;
-        F_ext_bias_init_flag = true;                        
-        
+        F_ext_bias_init_flag = true;              
+        realtimeupdate_ = false;
+
         fin_.open("/home/kimm/kimm_catkin/src/kimm_phri_panda_husky/calibration/calibration.txt");
         est_time_ = time_;
 
@@ -1294,8 +1320,9 @@ void pHRIFrankaHuskyController::teleopjoyCallback(const sensor_msgs::JoyConstPtr
         cout << "start estimation" << endl;
         isstartestimation_ = true; 
         tau_bias_init_flag = true;
-        F_ext_bias_init_flag = true;                        
-        
+        F_ext_bias_init_flag = true;         
+        realtimeupdate_ = false;
+
         fin_.open("/home/kimm/kimm_catkin/src/kimm_phri_panda_husky/calibration/calibration.txt");
         est_time_ = time_;
 
@@ -1599,7 +1626,8 @@ void pHRIFrankaHuskyController::modeChangeReaderProc(){
               cout << "start estimation" << endl;
               isstartestimation_ = true; 
               tau_bias_init_flag = true;
-              F_ext_bias_init_flag = true;              
+              F_ext_bias_init_flag = true;    
+              realtimeupdate_ = false;
               
               fin_.open("/home/kimm/kimm_catkin/src/kimm_phri_panda_husky/calibration/calibration.txt");
               est_time_ = time_;

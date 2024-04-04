@@ -94,6 +94,8 @@ int main(int argc, char **argv)
         ctrl_->g(robot_g_);  // dim model.nv, [Nm]        
         ctrl_->state(state_);           
         ctrl_->JWorld(robot_J_world_);     //world
+
+        // cout << robot_mass_.eigenvalues().real()[0] << endl;        
         
         // ctrl_->g_joint7(robot_g_local_);  //g [m/s^2] w.r.t joint7 axis
         // ctrl_->JLocal(robot_J_local_);     //local

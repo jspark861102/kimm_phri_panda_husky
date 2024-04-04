@@ -118,8 +118,9 @@ namespace RobotController{
             void g(VectorXd & g_vec);
             void g_joint7(VectorXd & g_vec);
             void g_local_offset(VectorXd & g_vec);
-            void Fh_gain_matrix(MatrixXd & Fh, MatrixXd & Fh_local);
+            void Fh_gain_matrix(MatrixXd & Fh, MatrixXd & Fh_local, bool isinteractiongain);
             void MxLocal_offset(MatrixXd & Mx);
+            void MxGlobal(MatrixXd & Mx);
 
             void ee_state(Vector3d & pos, Eigen::Quaterniond & quat);
             void base_state(Vector3d & base);
@@ -136,7 +137,7 @@ namespace RobotController{
             void eeoffset_update();
             void R_joint7();
             void EstimationMotion();
-
+            void CartesianInertia(MatrixXd & Me_);                
 
             int ctrltype(){
                 return ctrl_mode_;
@@ -170,6 +171,7 @@ namespace RobotController{
             ofstream fout_;  
             double traj_length_in_time_, target_distance_, target_time_, target_velocity_;   
             bool ismobile_, isrobotiq_;           
+            MatrixXd Me_;
 
             //hqp
             std::shared_ptr<kimmhqp::robot::RobotWrapper> robot_;

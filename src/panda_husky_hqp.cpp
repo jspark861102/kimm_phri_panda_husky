@@ -153,6 +153,7 @@ namespace RobotController{
         initial_calibration_update_ = false;                 
 
         //inertia shaping --------------------------------//
+        Me_.resize(6,6);
         Me_inv_.resize(6,6);
         Me_inv_.setIdentity();                 
         eeTask_->setDesiredinertia(MatrixXd::Identity(6,6));
@@ -162,7 +163,7 @@ namespace RobotController{
         }
         //-----------------------------------------------//
 
-        //Fh gain in global ------------------------------//
+        //Fh gain in global ------------------------------//        
         Fh_.resize(6,6);    
         Fh_.setZero();                 
         
@@ -187,6 +188,37 @@ namespace RobotController{
         cout << " " << endl;
         cout << "Fh_local_" << endl;
         cout << Fh_local_ << endl;    
+    }    
+    void FrankaHuskyWrapper::CartesianInertia(MatrixXd & Me_){
+        MatrixXd Mx, rGh, Pd; //local
+        this->MxLocal_offset(Mx);
+        
+        rGh.resize(6,6);
+        rGh.setIdentity();
+        rGh.bottomLeftCorner(3,3) = -1.0 * skew_matrix(obj_length_local_);
+
+        Pd.resize(6,6);
+        Pd.setZero();
+        Pd(1,5) = Fh_local_(1,5);
+        Pd(2,4) = -1.0 * Fh_(2,3);
+
+        Me_ = (rGh + Pd).inverse() * Mx;        
+
+        // MatrixXd Mx, rGh, Pd; //local
+        // this->MxGlobal(Mx);
+        
+        // rGh.resize(6,6);
+        // rGh.setIdentity();
+        // rGh.bottomLeftCorner(3,3) = -1.0 * skew_matrix(obj_length_global_);
+
+        // Pd.resize(6,6);
+        // Pd.setZero();
+        // Pd(0,5) = 5.0;//5.0;
+        // Pd(2,3) = -4.0;//-4.0;
+
+        // Me_ = (rGh + Pd).inverse() * Mx;        
+        // // Me_ = rGh.inverse() * Mx;        
+        // // Me_ = Mx;        
     }
 
     void FrankaHuskyWrapper::EstimationMotion(){ 
@@ -505,9 +537,9 @@ namespace RobotController{
                     double fz = 0.4;                                
                     if (isrobotiq_) { 
                         //to make global -x axis (5deg) & -y axis (3deg)
-                        double anglex = -5*M_PI/180.0*2.0*M_PI*fx*cos(2.0*M_PI*fx*(time_ - est_time_));
-                        double angley = -5*M_PI/180.0*2.0*M_PI*fy*cos(2.0*M_PI*fy*(time_ - est_time_));
-                        double anglez = -5*M_PI/180.0*2.0*M_PI*fz*cos(2.0*M_PI*fz*(time_ - est_time_));                        
+                        double anglex = -8*M_PI/180.0*2.0*M_PI*fx*cos(2.0*M_PI*fx*(time_ - est_time_));
+                        double angley = +5*M_PI/180.0*2.0*M_PI*fy*cos(2.0*M_PI*fy*(time_ - est_time_));
+                        double anglez = -3*M_PI/180.0*2.0*M_PI*fz*cos(2.0*M_PI*fz*(time_ - est_time_));                        
                         // double anglez = 0.0;                        
                     
                         vel_vec_null << 0.0, 0.0, 0.0, anglex, angley, anglez; //joint7 is 90deg rotated w.r.t. global coordinate
@@ -654,9 +686,9 @@ namespace RobotController{
                     double fz = 0.4;                                
                     if (isrobotiq_) { 
                         //to make global -x axis (5deg) & -y axis (3deg)
-                        double anglex = -5*M_PI/180.0*2.0*M_PI*fx*cos(2.0*M_PI*fx*(time_ - est_time_));
-                        double angley = -5*M_PI/180.0*2.0*M_PI*fy*cos(2.0*M_PI*fy*(time_ - est_time_));
-                        double anglez = -5*M_PI/180.0*2.0*M_PI*fz*cos(2.0*M_PI*fz*(time_ - est_time_));                        
+                        double anglex = -8*M_PI/180.0*2.0*M_PI*fx*cos(2.0*M_PI*fx*(time_ - est_time_));
+                        double angley = +5*M_PI/180.0*2.0*M_PI*fy*cos(2.0*M_PI*fy*(time_ - est_time_));
+                        double anglez = -3*M_PI/180.0*2.0*M_PI*fz*cos(2.0*M_PI*fz*(time_ - est_time_));                        
                         // double anglez = 0.0;                        
                     
                         vel_vec_null << 0.0, 0.0, 0.0, anglex, angley, anglez;
@@ -1987,8 +2019,8 @@ namespace RobotController{
 
     void FrankaHuskyWrapper::g_local_offset(VectorXd & g_vec){
         Vector3d g_global;
-        // g_global << 0.0, 0.0, -9.81;
-        g_global << 0.0, 0.0, 9.81;
+        g_global << 0.0, 0.0, -9.81;
+        //g_global << 0.0, 0.0, 9.81;
         
         SE3 m_wMl;                
         m_wMl = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;        
@@ -2042,11 +2074,26 @@ namespace RobotController{
 
         Mx = J_transpose_inverse * M * J_inverse;    
     }
-    
 
-    void FrankaHuskyWrapper::Fh_gain_matrix(MatrixXd & Fh, MatrixXd & Fh_local){
-        Fh = Fh_;   
-        Fh_local = Fh_local_;     
+    void FrankaHuskyWrapper::MxGlobal(MatrixXd & Mx){
+        MatrixXd M, J, J_inverse, J_transpose_inverse;
+        this->mass(M);
+        this->JWorld(J);
+        J_inverse = J.completeOrthogonalDecomposition().pseudoInverse();
+        J_transpose_inverse = J.transpose().completeOrthogonalDecomposition().pseudoInverse();        
+
+        Mx = J_transpose_inverse * M * J_inverse;    
+    }    
+
+    void FrankaHuskyWrapper::Fh_gain_matrix(MatrixXd & Fh, MatrixXd & Fh_local, bool isinteractiongain){
+        if (isinteractiongain) {
+            Fh = Fh_;   
+            Fh_local = Fh_local_;     
+        }
+        else {
+            Fh.setZero();
+            Fh_local.setZero();                      
+        }
     }
 
     void FrankaHuskyWrapper::ee_state(Vector3d & pos, Eigen::Quaterniond & quat){

@@ -110,7 +110,7 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
   Vector6d FT_global_to_local(Vector6d & f_global);
   void velocity_offset_pub();
   void robot_g_local_pub();
-  void test_publication();
+  void pubInertiaEigen();
   ////////////////////////////////////////////////////////
 
   void keyboard_event();
@@ -186,7 +186,7 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
     realtime_tools::RealtimePublisher<geometry_msgs::Twist> husky_ctrl_pub_;
     ros::Publisher ee_state_pub_, torque_state_pub_, joint_state_pub_;
     ros::Publisher base_state_pub_, husky_odom_pub_, velocity_offset_pub_, Fext_local_pub_, robot_g_local_pub_;
-    ros::Publisher Fext_local_forObjectEstimation_pub_, object_parameter_pub_, vel_pub_, accel_pub_, Fext_global_pub_, Finput_local_pub_, test_pub_;
+    ros::Publisher Fext_local_forObjectEstimation_pub_, object_parameter_pub_, vel_pub_, accel_pub_, Fext_global_pub_, Finput_local_pub_, eigen_pub_;
     ros::ServiceClient setload_client;
     tf::TransformBroadcaster* br_;
     tf::TransformListener listener_;
@@ -229,7 +229,7 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
     Vector3d odom_lpf_, odom_dot_lpf_, odom_lpf_prev_, odom_dot_lpf_prev_, carto_lpf_, carto_lpf_prev_;
     Eigen::VectorXd franka_qacc_, robot_nle_, robot_g_, husky_qvel_, husky_qacc_, husky_qvel_prev_;;
     Vector2d husky_cmd_, wheel_vel_;
-    MatrixXd robot_mass_, robot_J_, robot_tau_, robot_tau_d_, robot_mass_practical_, robot_mass_pin_;
+    MatrixXd robot_mass_, robot_J_, robot_tau_, robot_tau_d_, robot_mass_practical_, robot_mass_pin_, Me_;
     double time_, dt_, traj_length_in_time_;
     bool isgrasp_,ismobile_, issimulation_, load_gripper_, isrobotiq_, iscalibration_;
     VectorXi isbutton_pushed_;
@@ -247,7 +247,7 @@ class pHRIFrankaHuskyController : public controller_interface::MultiInterfaceCon
     EKF * ekf;
     Objdyn objdyn;
 
-    bool isstartestimation_, tau_bias_init_flag, F_ext_bias_init_flag, isobjectdynamics_, ismasspractical_;
+    bool isstartestimation_, tau_bias_init_flag, F_ext_bias_init_flag, isobjectdynamics_, ismasspractical_, realtimeupdate_, isinteractiongain_;
     double n_param, m_FT;
     Eigen::MatrixXd A, H, Q, R, P;
     Eigen::VectorXd h, FT_measured, param_estimated_, param_used_, param_d435_, param_tip_, robot_g_local_, FT_object_, param_true_;
